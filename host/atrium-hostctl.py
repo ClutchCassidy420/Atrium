@@ -538,7 +538,10 @@ def container_state() -> dict:
     for p in load_points():
         if not p.get("rolled_back"):
             points[p["project"]] = {"id": p["id"], "created": p["created"], "services": [s["service"] for s in p["services"]]}
-    return {"checked_at": cached.get("checked_at"), "projects": list((cached.get("projects") or {}).values()), "op": op, "last": last,
+    projects = list((cached.get("projects") or {}).values())
+    for p in projects:
+        p["tier"] = tier_of(p["project"])           # always the current settings, not what was saved at the last check
+    return {"checked_at": cached.get("checked_at"), "projects": projects, "op": op, "last": last,
             "restore_points": points, "keep_days": KEEP_DAYS, "checking": CHECK_LOCK.locked()}
 
 

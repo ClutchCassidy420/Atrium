@@ -249,3 +249,12 @@ def test_old_restore_points_are_pruned(hc, monkeypatch, tmp_path):
     monkeypatch.setattr(hc, "run", lambda cmd, timeout=60, env=None: (0, ""))
     hc.prune_points()
     assert [p["id"] for p in hc.load_points()] == ["new"]
+
+
+def test_the_page_always_shows_the_current_tiers(hc, monkeypatch, tmp_path):
+    (tmp_path / "containers.json").write_text(json.dumps({"checked_at": 1, "projects": {"files": {"project": "files", "tier": "high", "update": True, "services": []}}}))
+    monkeypatch.setattr(hc, "unit_active", lambda unit: False)
+    monkeypatch.setattr(hc, "TIER_MEDIUM", set())
+    assert hc.container_state()["projects"][0]["tier"] == "high"
+    monkeypatch.setattr(hc, "TIER_MEDIUM", {"files"})                      # the settings changed after the last check
+    assert hc.container_state()["projects"][0]["tier"] == "medium"
