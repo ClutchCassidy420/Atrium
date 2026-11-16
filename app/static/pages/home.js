@@ -34,8 +34,7 @@
     var orbState = ag.running === false ? "offline" : run === "waiting_for_approval" ? "waiting" : (ag.busy || ag.active_agents || run) ? "working" : "idle";
     var status = h("div", { className: "hm-presence-line" }, h("span", { className: "hm-presence-name" }, name), h(Chip, { tone: tone, dot: true }, label), ag.version ? h(Chip, null, "Hermes " + ag.version) : null,
       props.canStyle && X ? h(X.EngineChip, null) : null,
-      props.canStyle && X ? h(X.ApprovalsLink, { name: name }) : null,
-      props.canStyle ? h("a", { className: "hm-style", href: "/settings#avatar", title: "Change how " + name + " looks" }, "✦ Style") : null);
+      props.canStyle && X ? h(X.ApprovalsLink, { name: name }) : null);
     if (!A) return h("div", { className: "hm-presence", id: "hm-avatar-slot" }, h("div", { className: "hm-orb hm-orb-" + tone, "aria-hidden": "true" }, h("span", null, (name || "A").slice(0, 1).toUpperCase())), status);
     return h(SDK.React.Fragment, null, h(A.Galaxy, { state: orbState }), h(A.Orb, { state: orbState }), status);
   }

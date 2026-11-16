@@ -117,9 +117,10 @@
 .hm-check-row { display: flex; align-items: center; gap: 8px; margin: 8px 0; color: var(--color-muted-foreground); }
 
 /* the drawn avatar in the hero: the scene fills the card, the character stands at the right, the text sits over both */
-.hm-hero-art { position: relative; grid-template-columns: 1fr; padding-right: 250px; min-height: 300px; overflow: hidden; }
+.hm-hero-art { --orb-h: 360px; --orb-w: 288px; --orb-r: clamp(1.5rem, calc(24% - 60px), 22rem); position: relative; grid-template-columns: 1fr; padding-right: calc(var(--orb-w) + var(--orb-r) + 16px); min-height: 400px; overflow: hidden; }
+@media (min-width: 1100px) { .hm-hero-art { --orb-h: 400px; --orb-w: 320px; min-height: 440px; } }
 .hm-hero-art > .atl-galaxy { position: absolute; left: 0; top: 0; z-index: 0; }
-.hm-hero-art > .atl-orb { position: absolute; right: 1.5rem; top: 50%; transform: translateY(-50%); width: 200px; height: 250px; pointer-events: none; z-index: 1; }
+.hm-hero-art > .atl-orb { position: absolute; right: var(--orb-r); top: 50%; transform: translateY(-50%); width: var(--orb-w); height: var(--orb-h); pointer-events: none; z-index: 1; }
 .hm-hero-art > .hm-hero-main, .hm-hero-art > .hm-presence-line { position: relative; z-index: 2; }
 .hm-presence-line { grid-row: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .hm-presence-name { font-weight: 700; }
