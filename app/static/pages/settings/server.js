@@ -42,12 +42,17 @@
   function plural(n, w) { return n + " " + w + (n === 1 ? "" : "s"); }
 
   function describe(p) {
-    var parts = [];
-    (p.services || []).forEach(function (s) {
-      if (s.update) parts.push(s.newer && s.newer !== "new build" ? "version " + s.newer : "a new build");
+    // what is available, and for which part of the group: "nextcloud, cron to 35.0.3; redis to 7.4.12; db to 17.12"
+    var groups = {}, order = [], one = (p.services || []).filter(function (s) { return s.update; });
+    one.forEach(function (s) {
+      var tag = s.newer && s.newer !== "new build" ? s.newer : "";
+      var label = s.service === p.project ? p.project : s.service.indexOf(p.project + "-") === 0 ? s.service.slice(p.project.length + 1) : s.service;
+      if (!(tag in groups)) { groups[tag] = []; order.push(tag); }
+      if (groups[tag].indexOf(label) < 0) groups[tag].push(label);
     });
-    parts = parts.filter(function (x, i) { return parts.indexOf(x) === i; });
-    return parts.length ? parts.join(", ") + " available" : "";
+    if (!order.length) return "";
+    if (one.length === 1 && one[0].service === p.project) return (order[0] ? "version " + order[0] : "new build") + " available";
+    return order.map(function (t) { return groups[t].join(", ") + (t ? " to " + t : ": new build"); }).join("; ") + " available";
   }
 
   var RISK = { low: "Low", medium: "Medium", high: "High", care: "Care" };
