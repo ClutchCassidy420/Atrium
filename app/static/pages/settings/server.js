@@ -1,7 +1,9 @@
 /**
- * Settings > Server: install updates, reboot, shut down (owners only; shown only when the install has a host helper).
+ * Settings > Server: one page, in the order things happen.
  *
- * Every action asks first, lists what could go wrong right now, and reboot and shutdown wait out a countdown you can cancel.
+ *   check  ->  what is waiting  ->  update (confirm, progress and result right in the row)  ->  recently updated, with Roll back  ->  restart if needed
+ *
+ * Package updates, container updates, reboot and shutdown all go through the host helper (owners only; shown only when the install has one).
  * Shown inside the Settings page as window.__APP_SUBPAGES__.server. Plain IIFE, no build.
  */
 (function () {
@@ -14,7 +16,7 @@
   var useEffect = SDK.hooks.useEffect;
   var fetchJSON = SDK.fetchJSON;
   var API = "/api/host";
-  var expecting = false, downSeen = false, expectingSince = 0;     // after a reboot or shutdown countdown ends: wait until the server has gone away and come back
+  var expecting = false, downSeen = false, expectingSince = 0;      // after a reboot or shutdown countdown ends: wait until the server has gone away and come back
 
   function errText(e) {
     var m = String((e && e.message) || e || "");
@@ -37,42 +39,54 @@
     var d = Math.floor(sec / 86400), hrs = Math.floor((sec % 86400) / 3600);
     return d ? d + " d " + hrs + " h" : hrs + " h " + Math.floor((sec % 3600) / 60) + " min";
   }
+  function plural(n, w) { return n + " " + w + (n === 1 ? "" : "s"); }
 
-  var ACTIONS = {
-    update_safe: { title: "Update system and editor", button: "Update now", body: "Installs the small system packages that are waiting. No restarts expected.", typed: "" },
-    update_care: { title: "Update Docker, GPU tools and the network tunnel", button: "Update now", body: "These can restart services for a moment, and remote access can drop. The update runs as its own job on the server, and this page reconnects and shows the result.", typed: "" },
-    reboot: { title: "Reboot the server", button: "Reboot", body: "Everything stops and then starts again by itself. Expect about three minutes offline. The containers come back on their own.", typed: "reboot", countdown: true },
-    shutdown: { title: "Shut down the server", button: "Shut down", body: "Everything stops and the server stays off until someone presses its power button. You cannot start it again from this app.", typed: "shut down", countdown: true, danger: true }
-  };
+  function describe(p) {
+    var parts = [];
+    (p.services || []).forEach(function (s) {
+      if (s.update) parts.push(s.newer && s.newer !== "new build" ? "version " + s.newer : "a new build");
+    });
+    parts = parts.filter(function (x, i) { return parts.indexOf(x) === i; });
+    return parts.length ? parts.join(", ") + " available" : "";
+  }
 
-  function PackageList(props) {
-    return h("details", { className: "ats-pkgs" },
-      h("summary", null, props.items.length + " package" + (props.items.length === 1 ? "" : "s")),
-      h("ul", null, props.items.map(function (p) { return h("li", { key: p.name }, h("code", null, p.name), " ", p.from, " → ", p.to); })));
+  var RISK = { low: "Low", medium: "Medium", high: "High", care: "Care" };
+
+  function Row(p) {
+    var r = p.row, live = p.running, open = p.open;
+    return h("div", { className: "sv-row" },
+      h("div", { className: "sv-main" }, h("div", { className: "sv-name" }, r.name), h("div", { className: "sv-sub" }, r.sub)),
+      h("div", { className: "sv-chips" }, h("span", { className: "sv-chip" }, r.type), r.risk ? h("span", { className: "sv-chip sv-risk-" + r.risk }, RISK[r.risk] || r.risk) : null),
+      h("div", { className: "sv-act" }, live ? null : r.button ? h("button", { type: "button", className: "ats-btn" + (r.primary ? " ats-btn-primary" : ""), disabled: p.locked, onClick: p.onOpen }, r.button)
+        : r.note ? h("span", { className: "sv-note" }, r.note) : null),
+      live ? h("div", { className: "sv-x" }, h("div", { className: "sv-step" }, live), h("div", { className: "sv-bar" }, h("i", null))) : null,
+      open && !live ? h("div", { className: "sv-x" },
+        h("div", null, open.text),
+        open.lines && open.lines.length ? h("ul", { className: "sv-lines" }, open.lines.map(function (l) { return h("li", { key: l }, l); })) : null,
+        h("div", { className: "sv-btns" },
+          h("button", { type: "button", className: "ats-btn" + (open.danger ? " ats-btn-danger" : " ats-btn-primary"), disabled: p.busy, onClick: p.onGo }, open.go),
+          h("button", { type: "button", className: "ats-btn", disabled: p.busy, onClick: p.onCancel }, "Cancel"))) : null);
   }
 
   function Server() {
     var d_ = useState(null), data = d_[0], setData = d_[1];
+    var c_ = useState(null), cdata = c_[0], setCdata = c_[1];
     var e_ = useState(""), err = e_[0], setErr = e_[1];
-    var c_ = useState(null), confirm = c_[0], setConfirm = c_[1];
-    var t_ = useState(""), typed = t_[0], setTyped = t_[1];
-    var f_ = useState(false), force = f_[0], setForce = f_[1];
+    var o_ = useState(""), openKey = o_[0], setOpenKey = o_[1];
     var b_ = useState(false), busy = b_[0], setBusy = b_[1];
     var m_ = useState(""), msg = m_[0], setMsg = m_[1];
     var n_ = useState(0), tick = n_[0], setTick = n_[1];
-    var w_ = useState(null), went = w_[0], setWent = w_[1];      // set when a power action ran out its countdown: waiting for the server to come back
+    var w_ = useState(null), went = w_[0], setWent = w_[1];      // a power action ran out its countdown: waiting for the server to come back
 
     function load() {
-      return fetchJSON(API + "/status").then(function (j) {
-        setData(j);
-        setErr("");
+      var a = fetchJSON(API + "/status").then(function (j) {
+        setData(j); setErr("");
         if (expecting && j && !j.reachable) downSeen = true;
         if (expecting && downSeen && j && j.reachable) { expecting = false; downSeen = false; setWent(null); setMsg("The server is back."); }
         else if (expecting && !downSeen && j && j.reachable && Date.now() - expectingSince > 60000) { expecting = false; setWent(null); setMsg("The server never went down (is the helper in test mode?)."); }
-      }).catch(function (e) {
-        if (expecting) { downSeen = true; return; }
-        setErr(errText(e));
-      });
+      }).catch(function (e) { if (expecting) { downSeen = true; return; } setErr(errText(e)); });
+      var b = fetchJSON(API + "/containers").then(setCdata).catch(function () { setCdata(function (x) { return x || { off: true }; }); });
+      return Promise.all([a, b]);
     }
     useEffect(function () { load(); }, []);
     useEffect(function () {      // a notice fades after a few seconds
@@ -80,169 +94,83 @@
       var id = setTimeout(function () { setMsg(""); }, 6000);
       return function () { clearTimeout(id); };
     }, [msg]);
-    var live = !!(data && ((data.update && data.update.running) || data.scheduled)) || !!went;
+    var live = !!((data && ((data.update && data.update.running) || data.scheduled)) || (cdata && (cdata.op || cdata.checking)) || went);
     useEffect(function () {
       var id = setInterval(function () { load(); setTick(function (n) { return n + 1; }); }, live ? 2500 : 20000);
       return function () { clearInterval(id); };
     }, [live]);
-    useEffect(function () {      // a one second beat for the countdown text
+    useEffect(function () {      // a half second beat for the countdown text
       if (!(data && data.scheduled)) return undefined;
       var id = setInterval(function () { setTick(function (n) { return n + 1; }); }, 500);
       return function () { clearInterval(id); };
     }, [!!(data && data.scheduled)]);
 
-    if (!data) return h("div", { className: "ats-card" }, h("div", { className: "ats-note" }, err || "Loading…"));
-    if (!data.enabled) return h("div", { className: "ats-card" }, h("div", { className: "ats-note" }, "Server actions are not set up on this install."));
-    if (!data.reachable && !went) return h("div", { className: "ats-card" }, h("div", { className: "ats-h" }, "Server"), h("div", { className: "ats-err" }, "The host helper is not answering, so server actions are unavailable."));
+    if (!data) return h("div", { className: "ats-note" }, err || "Loading…");
+    if (!data.enabled) return h("div", { className: "ats-note" }, "Server actions are not set up on this install.");
+    if (!data.reachable && !went) return h("div", { className: "ats-err" }, "The host helper is not answering, so server actions are unavailable.");
 
     var pk = data.packages || { safe: [], care: [] };
     var up = data.update || {};
     var sched = data.scheduled;
+    var cd = cdata && !cdata.off ? cdata : null;
     var warnings = [];
     if (data.busy && data.busy.runs) warnings.push("The agent is in the middle of a chat run.");
     if (data.busy && data.busy.cards) warnings.push("A board card is running.");
     if (data.backup_running) warnings.push("A backup is running.");
-    var locked = !!(up.running || sched);
 
-    function open(k) { setConfirm(k); setTyped(""); setForce(false); setMsg(""); setErr(""); }
-    function go() {
-      var a = ACTIONS[confirm];
-      if (a.typed && typed.trim().toLowerCase() !== a.typed) { setErr("Type “" + a.typed + "” first."); return; }
-      if (warnings.length && !force) { setErr("Tick the box to go ahead while those are happening."); return; }
-      setBusy(true);
-      post(API + "/action", { action: confirm, force: force }).then(function () {
-        setConfirm(null); setMsg(a.countdown ? "Scheduled." : "Update started."); return load();
-      }).catch(function (e) { setErr(errText(e)); }).then(function () { setBusy(false); });
+    /* ---- the rows: what can be updated ---- */
+    var rows = [];
+    if (pk.safe.length) rows.push({ key: "sys:safe", name: "System packages", sub: plural(pk.safe.length, "small package") + " · no restarts expected", type: "System", risk: "low", button: "Update", primary: true, kind: "action", action: "update_safe", text: "Installs the small system packages that are waiting. No restarts are expected.", go: "Update now", rank: 0 });
+    if (pk.care.length) rows.push({ key: "sys:care", name: "Docker, GPU tools and the network tunnel", sub: plural(pk.care.length, "package") + " · can briefly drop containers and remote access", type: "System", risk: "care", button: "Update", primary: false, kind: "action", action: "update_care", text: "Services restart for a moment and remote access can drop. The update runs as its own job on the server, so this page can reconnect and show the result.", go: "Update now", rank: 1 });
+    ((cd && cd.projects) || []).forEach(function (p) {
+      if (!p.update) return;
+      var can = p.tier === "low" || p.tier === "medium";
+      var names = (p.services || []).filter(function (s) { return s.update; }).map(function (s) { return s.service; });
+      rows.push({ key: "ct:" + p.project, name: p.project, sub: describe(p), type: "Container", risk: p.tier, button: can ? "Update" : "", note: can ? "" : "Update by hand", primary: false, kind: "container", project: p.project,
+        text: "The group is updated together (" + names.join(", ") + "). The current build is kept for " + cd.keep_days + " days, and if the new one is not healthy it rolls back by itself.", go: "Update now", rank: can ? 2 : 3 });
+    });
+    rows.sort(function (a, b) { return a.rank - b.rank; });
+
+    /* ---- what is running right now (shown inside its row) ---- */
+    var liveText = {};
+    if (up.running) liveText[(up.progress && up.progress.kind) === "update_care" ? "sys:care" : "sys:safe"] = ((up.progress && up.progress.step) || "working") + (up.progress && up.progress.total ? " (" + plural(up.progress.total, "package") + ")" : "") + ". It runs on the server, so you can leave this page.";
+    if (cd && cd.op) liveText["ct:" + cd.op.project] = (cd.op.op === "container_rollback" ? "Rolling back: " : "Updating: ") + cd.op.step + ". It runs on the server, so you can leave this page.";
+    var locked = !!(up.running || sched || (cd && cd.op));
+
+    /* ---- recently updated (with Roll back) ---- */
+    var recent = [];
+    if (cd) Object.keys(cd.restore_points || {}).forEach(function (proj) {
+      var p = (cd.projects || []).filter(function (x) { return x.project === proj; })[0];
+      if (p && p.tier !== "high") recent.push({ key: "rb:" + proj, project: proj, created: cd.restore_points[proj].created });
+    });
+    recent.sort(function (a, b) { return b.created - a.created; });
+
+    /* ---- the panel that opens under a row ---- */
+    function openFor(key) {
+      if (openKey !== key) return null;
+      var row = rows.filter(function (r) { return r.key === key; })[0];
+      var notes = warnings.map(function (w) { return "⚠ " + w; });
+      if (row) return { text: row.text, go: row.go, lines: notes, danger: false };
+      if (key.indexOf("rb:") === 0) return { text: "Puts back the build you had before the last update and recreates the containers. Your data stays as it is now: if the newer version changed its data files, the program rolls back but the data does not.", go: "Roll back", lines: [], danger: false };
+      if (key === "power:reboot") return { text: "Everything stops and then starts again by itself, usually within three minutes. You get " + (data.countdown || 30) + " seconds to cancel.", go: "Reboot", lines: notes, danger: false };
+      if (key === "power:shutdown") return { text: "Everything stops and the server stays off until someone presses its power button. You cannot start it again from this app. You get " + (data.countdown || 30) + " seconds to cancel.", go: "Shut down", lines: notes, danger: true };
+      return null;
     }
-    function cancel() {
+    function go() {
+      setBusy(true);
+      var key = openKey, p;
+      var row = rows.filter(function (r) { return r.key === key; })[0];
+      if (row && row.kind === "action") p = post(API + "/action", { action: row.action, force: true });
+      else if (row && row.kind === "container") p = post(API + "/containers/update", { project: row.project, force: true });
+      else if (key.indexOf("rb:") === 0) p = post(API + "/containers/rollback", { project: key.slice(3) });
+      else p = post(API + "/action", { action: key === "power:reboot" ? "reboot" : "shutdown", force: true });
+      p.then(function () { setOpenKey(""); setMsg(key.indexOf("power:") === 0 ? "Scheduled." : "Started."); return load(); })
+        .catch(function (e) { setErr(errText(e)); }).then(function () { setBusy(false); });
+    }
+    function cancelPower() {
       setBusy(true);
       post(API + "/cancel", {}).then(function () { setMsg("Cancelled. Nothing changed."); return load(); })
         .catch(function (e) { setErr(errText(e)); }).then(function () { setBusy(false); });
-    }
-
-    var left = sched ? Math.max(0, Math.round(sched.at - Date.now() / 1000)) : 0;
-    if (sched && left <= 0 && !went) { expecting = true; downSeen = false; expectingSince = Date.now(); setTimeout(function () { setWent({ action: sched.action }); }, 0); }
-
-    var last = up.last;
-    var lastLine = last ? (last.ok ? "Last update " + ago(last.finished) + ": " + (last.packages || []).length + " packages" + (last.dry_run ? " (test run)" : "") + (last.containers_missing && last.containers_missing.length ? ". Missing containers: " + last.containers_missing.join(", ") : ". All " + last.containers_after + " containers running.") + (last.reboot_required ? " A restart is needed to finish." : "")
-      : "Last update " + ago(last.finished) + " failed. See the log below.") : "";
-
-    var confirmPanel = null;
-    if (confirm && !locked) {
-      var a = ACTIONS[confirm];
-      confirmPanel = h("div", { className: "ats-confirm" + (a.danger ? " ats-confirm-danger" : "") },
-        h("div", { className: "ats-h" }, a.title),
-        h("div", { className: "ats-note" }, a.body),
-        h("ul", { className: "ats-checks" },
-          warnings.length ? warnings.map(function (w) { return h("li", { key: w, className: "ats-warn" }, "⚠ " + w); })
-            : [h("li", { key: "a", className: "ats-okline" }, "✓ No chat run in progress"), h("li", { key: "b", className: "ats-okline" }, "✓ No board card running"), h("li", { key: "c", className: "ats-okline" }, "✓ No backup running")]),
-        warnings.length ? h("label", { className: "ats-inline" }, h("input", { type: "checkbox", checked: force, onChange: function (ev) { setForce(ev.target.checked); } }), "Go ahead anyway") : null,
-        a.typed ? h("div", { className: "ats-inline" }, h("span", { className: "ats-note" }, "Type “" + a.typed + "” to confirm"),
-          h("input", { className: "ats-input", value: typed, onChange: function (ev) { setTyped(ev.target.value); setErr(""); }, "aria-label": "Confirmation" })) : null,
-        a.countdown ? h("div", { className: "ats-note" }, "You will get " + (data.countdown || 30) + " seconds to cancel before it happens.") : null,
-        h("div", { className: "ats-actions" },
-          h("button", { type: "button", className: "ats-btn" + (a.danger ? " ats-btn-danger" : " ats-btn-primary"), disabled: busy, onClick: go }, a.button),
-          h("button", { type: "button", className: "ats-btn", disabled: busy, onClick: function () { setConfirm(null); setErr(""); } }, "Cancel")));
-    }
-
-    var statusBanner = null;
-    if (went) statusBanner = h("div", { className: "ats-confirm ats-confirm-danger" }, h("div", { className: "ats-h" }, went.action === "shutdown" ? "Shutting down" : "Rebooting"),
-      h("div", { className: "ats-note" }, went.action === "shutdown" ? "The server is going off. This page will not be reachable until someone turns it back on." : "This page reconnects when the server is back, usually within three minutes."));
-    else if (sched) statusBanner = h("div", { className: "ats-confirm ats-confirm-danger" }, h("div", { className: "ats-h" }, (sched.action === "shutdown" ? "Shutting down" : "Rebooting") + " in " + left + " s"),
-      h("div", { className: "ats-note" }, "Requested by " + (sched.user || "an owner") + ". Cancel now to stop it."),
-      h("div", { className: "ats-actions" }, h("button", { type: "button", className: "ats-btn ats-btn-primary", disabled: busy, onClick: cancel }, "Cancel")));
-    else if (up.running) statusBanner = h("div", { className: "ats-confirm" }, h("div", { className: "ats-h" }, "Updating"),
-      h("div", { className: "ats-note" }, ((up.progress && up.progress.step) || "working") + (up.progress && up.progress.total ? " (" + up.progress.total + " packages)" : "") + ". It runs on the server, so you can leave this page."));
-
-    var total = pk.safe.length + pk.care.length;
-    return h("div", { className: "ats-server" },
-      statusBanner,
-      msg ? h("div", { className: "ats-msg" }, msg) : null,
-      err ? h("div", { className: "ats-err" }, err) : null,
-      data.dry_run ? h("div", { className: "ats-note" }, "Test mode: updates are simulated and reboot and shutdown do nothing.") : null,
-      h("div", { className: "ats-card" },
-        h("div", { className: "ats-row" }, h("div", { className: "ats-h" }, "Updates"), h("span", { className: "ats-paused" }, total ? total + " waiting" : "up to date")),
-        lastLine ? h("div", { className: "ats-note" }, lastLine) : null,
-        h("div", { className: "ats-grid ats-grid-2" },
-          h("div", { className: "ats-sub-card" },
-            h("div", { className: "ats-row-t" }, "System and editor"),
-            h("div", { className: "ats-note" }, "Small Ubuntu packages. Low risk, no restarts expected."),
-            pk.safe.length ? h(PackageList, { items: pk.safe }) : h("div", { className: "ats-note" }, "Nothing waiting."),
-            h("button", { type: "button", className: "ats-btn ats-btn-primary", disabled: locked || !pk.safe.length, onClick: function () { open("update_safe"); } }, "Update now")),
-          h("div", { className: "ats-sub-card ats-sub-care" },
-            h("div", { className: "ats-row-t" }, "Docker, GPU tools and the network tunnel"),
-            h("div", { className: "ats-note" }, "Can briefly drop containers and remote access."),
-            pk.care.length ? h(PackageList, { items: pk.care }) : h("div", { className: "ats-note" }, "Nothing waiting."),
-            h("button", { type: "button", className: "ats-btn", disabled: locked || !pk.care.length, onClick: function () { open("update_care"); } }, "Update with care")))),
-      h("div", { className: "ats-card" },
-        h("div", { className: "ats-h" }, "Power"),
-        h("div", { className: "ats-note" }, "Owners only. Every action is logged with who and when." + (data.uptime_seconds != null ? " Up for " + uptime(data.uptime_seconds) + "." : "") + (data.reboot_required ? " A restart is needed to finish earlier updates." : "")),
-        h("div", { className: "ats-actions" },
-          h("button", { type: "button", className: "ats-btn", disabled: locked, onClick: function () { open("reboot"); } }, "Reboot server"),
-          h("button", { type: "button", className: "ats-btn ats-btn-danger", disabled: locked, onClick: function () { open("shutdown"); } }, "Shut down server"))),
-      confirmPanel,
-      (data.log && data.log.length) ? h("div", { className: "ats-card" },
-        h("div", { className: "ats-h" }, "Recent server actions"),
-        h("ul", { className: "ats-log" }, data.log.map(function (x, i) { return h("li", { key: i }, h("span", { className: "ats-note" }, ago(x.ts)), " ", h("b", null, x.user || "?"), " · ", x.action, " · ", x.result); }))) : null);
-  }
-
-  /* ---- containers: newer images, update one group with a restore point, roll back ---------------------------------------- */
-
-  var TIER = { low: "Low risk", medium: "Medium risk", high: "High risk" };
-
-  function describe(p) {
-    var parts = [];
-    (p.services || []).forEach(function (s) {
-      if (s.update) parts.push(s.newer && s.newer !== "new build" ? "version " + s.newer + " is available" : "a new build is available");
-      else if (s.update === null) parts.push("couldn't check right now");
-    });
-    if (parts.length) return parts.filter(function (x, i) { return parts.indexOf(x) === i; }).join(", ");
-    var kinds = (p.services || []).map(function (s) { return s.kind; });
-    if (kinds.every(function (k) { return k === "built"; })) return "built on this server, not updated here";
-    if (kinds.every(function (k) { return k === "digest"; })) return "fixed to one exact build";
-    return "up to date";
-  }
-
-  function Containers() {
-    var d_ = useState(null), data = d_[0], setData = d_[1];
-    var e_ = useState(""), err = e_[0], setErr = e_[1];
-    var c_ = useState(null), confirm = c_[0], setConfirm = c_[1];     // {kind: "update"|"rollback", p: project}
-    var f_ = useState(false), force = f_[0], setForce = f_[1];
-    var b_ = useState(false), busy = b_[0], setBusy = b_[1];
-    var m_ = useState(""), msg = m_[0], setMsg = m_[1];
-
-    function load() {
-      return fetchJSON(API + "/containers").then(function (j) { setData(j); setErr(""); })
-        .catch(function (e) { if (!/404/.test(String(e && e.message))) setErr(errText(e)); setData(function (x) { return x || { off: true }; }); });
-    }
-    useEffect(function () { load(); }, []);
-    var running = !!(data && data.op) || !!(data && data.checking);
-    useEffect(function () {
-      var id = setInterval(load, running ? 3000 : 30000);
-      return function () { clearInterval(id); };
-    }, [running]);
-    useEffect(function () {
-      if (!msg) return undefined;
-      var id = setTimeout(function () { setMsg(""); }, 6000);
-      return function () { clearTimeout(id); };
-    }, [msg]);
-
-    if (!data || data.off) return null;
-    var projects = (data.projects || []).slice().sort(function (a, b) {
-      function rank(p) { return p.update && p.tier !== "high" ? 0 : p.update ? 1 : 2; }       // what you can update now, then what needs doing by hand, then the rest
-      return rank(a) - rank(b) || a.project.localeCompare(b.project);
-    });
-    var updates = projects.filter(function (p) { return p.update; }).length;
-    var warnings = [];
-    if (data.busy && data.busy.runs) warnings.push("The agent is in the middle of a chat run.");
-    if (data.busy && data.busy.cards) warnings.push("A board card is running.");
-
-    function go() {
-      if (warnings.length && confirm.kind === "update" && !force) { setErr("Tick the box to go ahead while those are happening."); return; }
-      setBusy(true);
-      post(API + "/containers/" + confirm.kind, { project: confirm.p.project, force: force }).then(function () {
-        setConfirm(null); setMsg(confirm.kind === "update" ? "Update started." : "Rolling back."); return load();
-      }).catch(function (e) { setErr(errText(e)); }).then(function () { setBusy(false); });
     }
     function check() {
       setBusy(true);
@@ -250,56 +178,83 @@
         .catch(function (e) { setErr(errText(e)); }).then(function () { setBusy(false); });
     }
 
-    var last = data.last;
-    var lastBanner = last && Date.now() / 1000 - last.finished < 6 * 3600 ? h("div", { className: "ats-confirm" + (last.ok ? "" : " ats-confirm-danger") },
-      h("div", { className: "ats-h" }, (last.op === "container_rollback" ? "Rollback of " : "Update of ") + last.project + (last.ok ? " finished" : " did not succeed")),
-      h("div", { className: "ats-note" }, last.note + (last.auto_rolled_back ? ". The previous build is running again." : "") + (last.dry_run ? " (test run)" : ""))) : null;
-    var opBanner = data.op ? h("div", { className: "ats-confirm" }, h("div", { className: "ats-h" }, (data.op.op === "container_rollback" ? "Rolling back " : "Updating ") + data.op.project),
-      h("div", { className: "ats-note" }, data.op.step + ". It runs on the server, so you can leave this page.")) : null;
+    var left = sched ? Math.max(0, Math.round(sched.at - Date.now() / 1000)) : 0;
+    if (sched && left <= 0 && !went) { expecting = true; downSeen = false; expectingSince = Date.now(); setTimeout(function () { setWent({ action: sched.action }); }, 0); }
 
-    var panel = null;
-    if (confirm && !data.op) {
-      var p = confirm.p, up = confirm.kind === "update";
-      var pt = (data.restore_points || {})[p.project];
-      panel = h("div", { className: "ats-confirm" },
-        h("div", { className: "ats-h" }, (up ? "Update " : "Roll back ") + p.project),
-        up ? h("div", { className: "ats-note" }, "The whole group is updated together: " + (p.services || []).filter(function (s) { return s.update; }).map(function (s) { return s.service + (s.newer && s.newer !== "new build" ? " to " + s.newer : ""); }).join(", ") + ".")
-           : h("div", { className: "ats-note" }, "Puts back the build you had before the last update and recreates the containers. Your data stays as it is now: if the newer version changed its data files, the program rolls back but the data does not."),
-        up ? h("ul", { className: "ats-checks" },
-          h("li", { className: "ats-okline" }, "✓ The current build is kept as a restore point for " + data.keep_days + " days"),
-          h("li", { className: "ats-okline" }, "✓ If the new build is not healthy, it rolls back by itself"),
-          warnings.map(function (w) { return h("li", { key: w, className: "ats-warn" }, "⚠ " + w); })) : null,
-        up && warnings.length ? h("label", { className: "ats-inline" }, h("input", { type: "checkbox", checked: force, onChange: function (ev) { setForce(ev.target.checked); } }), "Go ahead anyway") : null,
-        h("div", { className: "ats-actions" },
-          h("button", { type: "button", className: "ats-btn ats-btn-primary", disabled: busy, onClick: go }, up ? "Update now" : "Roll back"),
-          h("button", { type: "button", className: "ats-btn", disabled: busy, onClick: function () { setConfirm(null); setErr(""); } }, "Cancel")));
+    /* ---- header ---- */
+    var times = [];
+    if (cd && cd.checked_at) times.push("Checked " + ago(cd.checked_at));
+    if (data.uptime_seconds != null) times.push("Up for " + uptime(data.uptime_seconds));
+    var headLine = rows.length ? plural(rows.length, "update") + " waiting" : "Everything is up to date";
+
+    /* ---- banners ---- */
+    var banner = null;
+    if (went) banner = h("div", { className: "sv-banner sv-banner-danger" }, h("div", null, h("b", null, went.action === "shutdown" ? "Shutting down." : "Rebooting."), " ", went.action === "shutdown" ? "This page will not be reachable until someone turns the server back on." : "This page reconnects when the server is back, usually within three minutes."));
+    else if (sched) banner = h("div", { className: "sv-banner sv-banner-danger" }, h("div", null, h("b", null, (sched.action === "shutdown" ? "Shutting down" : "Rebooting") + " in " + left + " s."), " Requested by " + (sched.user || "an owner") + "."),
+      h("button", { type: "button", className: "ats-btn ats-btn-primary", disabled: busy, onClick: cancelPower }, "Cancel"));
+    else if (data.reboot_required) banner = h("div", { className: "sv-banner" }, h("div", null, "A restart is needed to finish the system updates."),
+      h("button", { type: "button", className: "ats-btn", disabled: locked, onClick: function () { setOpenKey("power:reboot"); } }, "Restart…"));
+
+    /* ---- results of the last run: a line, not a card ---- */
+    var results = [];
+    var lc = cd && cd.last && Date.now() / 1000 - cd.last.finished < 900 ? cd.last : null;
+    if (lc) results.push({ ok: lc.ok, text: (lc.op === "container_rollback" ? "Rolled back " : "Updated ") + lc.project + (lc.ok ? ": " : " did not succeed: ") + lc.note + (lc.auto_rolled_back ? ". The previous build is running again." : "") });
+    var lu = up.last && Date.now() / 1000 - up.last.finished < 900 && !up.running ? up.last : null;
+    if (lu) results.push({ ok: lu.ok, text: (lu.kind === "update_care" ? "Docker, GPU tools and the network tunnel" : "System packages") + (lu.ok ? ": " + plural((lu.packages || []).length, "package") + " installed" + ((lu.containers_missing || []).length ? ", missing containers: " + lu.containers_missing.join(", ") : ", all " + lu.containers_after + " containers running") + (lu.reboot_required ? ". A restart is needed to finish." : ".") : " failed. See the activity log.") });
+
+    /* ---- the quiet part: up to date, built here, couldn't check ---- */
+    var current = [], built = [], unknown = [];
+    ((cd && cd.projects) || []).forEach(function (p) {
+      var kinds = (p.services || []).map(function (s) { return s.kind; });
+      if (p.update || recent.some(function (r) { return r.project === p.project; })) return;       // already shown above
+      if (kinds.length && kinds.every(function (k) { return k === "built"; })) built.push(p.project);
+      else if (p.unknown) unknown.push(p.project);
+      else current.push(p.project);
+    });
+
+    function rowFor(r, extra) {
+      return h(Row, { key: r.key, row: r, locked: locked, busy: busy, running: liveText[extra || r.key] || "", open: openFor(r.key),
+        onOpen: function () { setOpenKey(r.key); setErr(""); }, onGo: go, onCancel: function () { setOpenKey(""); setErr(""); } });
     }
+    var powerOpen = openKey.indexOf("power:") === 0 && !locked ? openFor(openKey) : null;
 
-    return h("div", { className: "ats-server" },
-      opBanner, lastBanner,
+    return h("div", { className: "sv" },
+      h("div", { className: "sv-top" },
+        h("div", null, h("div", { className: "sv-head" }, headLine), h("div", { className: "sv-sub" }, times.join(" · "))),
+        cd ? h("button", { type: "button", className: "ats-btn", disabled: busy || locked, onClick: check }, cd.checking ? "Checking…" : "Check now") : null),
+      banner,
       msg ? h("div", { className: "ats-msg" }, msg) : null,
       err ? h("div", { className: "ats-err" }, err) : null,
-      h("div", { className: "ats-card" },
-        h("div", { className: "ats-row" }, h("div", { className: "ats-h" }, "Containers"),
-          h("span", { className: "ats-paused" }, updates ? updates + " update" + (updates === 1 ? "" : "s") + " available" : "all current")),
-        h("div", { className: "ats-note" }, "Each group updates together. Before an update the current build is saved, so a rollback is one click for " + data.keep_days + " days. " +
-          (data.checked_at ? "Checked " + ago(data.checked_at) + "." : "Not checked yet.")),
-        h("div", { className: "ats-actions" }, h("button", { type: "button", className: "ats-btn", disabled: busy || running, onClick: check }, data.checking ? "Checking…" : "Check now")),
-        h("div", { className: "ats-ctable" }, projects.map(function (p) {
-          var pt = (data.restore_points || {})[p.project];
-          var can = (p.tier === "low" || p.tier === "medium") && p.update && !data.op;
-          return h("div", { key: p.project, className: "ats-crow" },
-            h("div", { className: "ats-cmain" }, h("div", { className: "ats-row-t" }, p.project, h("span", { className: "ats-tier ats-tier-" + p.tier }, TIER[p.tier] || p.tier)),
-              h("div", { className: "ats-note" }, describe(p) + (p.tier === "high" && p.update ? ". Update this one by hand." : ""))),
-            h("div", { className: "ats-actions" },
-              can ? h("button", { type: "button", className: "ats-btn ats-btn-primary", disabled: !!data.op, onClick: function () { setConfirm({ kind: "update", p: p }); setForce(false); setErr(""); } }, "Update") : null,
-              pt && p.tier !== "high" ? h("button", { type: "button", className: "ats-btn", disabled: !!data.op, title: "Saved " + ago(pt.created), onClick: function () { setConfirm({ kind: "rollback", p: p }); setErr(""); } }, "Roll back") : null));
-        }))),
-      panel);
+      data.dry_run ? h("div", { className: "sv-sub" }, "Test mode: updates are simulated and reboot and shutdown do nothing.") : null,
+      results.map(function (x, i) { return h("div", { key: i, className: "sv-result " + (x.ok ? "sv-ok" : "sv-bad") }, (x.ok ? "✓ " : "✗ ") + x.text); }),
+
+      rows.length ? h("div", { className: "sv-sec" }, "What can be updated") : null,
+      rows.map(function (r) { return rowFor(r); }),
+
+      recent.length ? h("div", { className: "sv-sec" }, "Updated recently") : null,
+      recent.map(function (r) {
+        return rowFor({ key: r.key, name: r.project, sub: "Updated " + ago(r.created) + " · the previous build is kept for " + cd.keep_days + " days", type: "Container", risk: "", button: "Roll back" }, "ct:" + r.project);
+      }),
+
+      (current.length || built.length || unknown.length) ? h("div", { className: "sv-sec" }, "Up to date") : null,
+      current.length ? h("div", { className: "sv-quiet" }, current.join(", ") + ". Nothing to do.") : null,
+      unknown.length ? h("div", { className: "sv-quiet" }, "Couldn't check right now: " + unknown.join(", ") + ". The registry may be limiting requests; try again later.") : null,
+      built.length ? h("div", { className: "sv-quiet" }, "Built on this server, not updated here: " + built.join(", ") + ".") : null,
+
+      h("div", { className: "sv-sec" }, "Power"),
+      h("div", { className: "sv-power" },
+        h("button", { type: "button", className: "ats-btn", disabled: locked, onClick: function () { setOpenKey("power:reboot"); } }, "Reboot"),
+        h("button", { type: "button", className: "ats-btn ats-btn-danger", disabled: locked, onClick: function () { setOpenKey("power:shutdown"); } }, "Shut down")),
+      powerOpen ? h("div", { className: "sv-x sv-x-block" }, h("div", null, powerOpen.text),
+        powerOpen.lines.length ? h("ul", { className: "sv-lines" }, powerOpen.lines.map(function (l) { return h("li", { key: l }, l); })) : null,
+        h("div", { className: "sv-btns" },
+          h("button", { type: "button", className: "ats-btn" + (powerOpen.danger ? " ats-btn-danger" : " ats-btn-primary"), disabled: busy, onClick: go }, powerOpen.go),
+          h("button", { type: "button", className: "ats-btn", disabled: busy, onClick: function () { setOpenKey(""); } }, "Cancel"))) : null,
+
+      (data.log && data.log.length) ? h("details", { className: "sv-log" },
+        h("summary", null, "Recent activity"),
+        h("ul", null, data.log.map(function (x, i) { return h("li", { key: i }, h("span", { className: "sv-sub" }, ago(x.ts)), " · ", x.user || "?", " · ", x.action, " · ", x.result); }))) : null);
   }
 
-  function ServerPage() { return h("div", { className: "ats-server" }, h(Server, null), h(Containers, null)); }
-
-  window.__APP_SUBPAGES__ = Object.assign(window.__APP_SUBPAGES__ || {}, { server: ServerPage });
+  window.__APP_SUBPAGES__ = Object.assign(window.__APP_SUBPAGES__ || {}, { server: Server });
 })();
-

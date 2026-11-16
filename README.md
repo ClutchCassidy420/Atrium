@@ -15,7 +15,7 @@ no cloud account needed.
 | **Workflows** | **Kanban** |
 | ![Scheduled jobs](docs/screenshots/workflows.png) | ![Kanban board](docs/screenshots/kanban.png) |
 | **Server actions** | **Container updates and rollback** |
-| ![Reboot countdown with cancel](docs/screenshots/server.png) | ![Container groups with update and roll back](docs/screenshots/containers.png) |
+| ![Server updates: one list, confirmation in the row](docs/screenshots/server.png) | ![After an update: result line and Roll back](docs/screenshots/containers.png) |
 
 Works on a phone, too, and installs as an app:
 

@@ -244,6 +244,7 @@ def run_update(kind: str) -> int:
 TIER_LOW = {x.strip() for x in os.environ.get("HOSTCTL_TIER_LOW", "").split(",") if x.strip()}
 TIER_MEDIUM = {x.strip() for x in os.environ.get("HOSTCTL_TIER_MEDIUM", "").split(",") if x.strip()}
 KEEP_DAYS = int(os.environ.get("HOSTCTL_KEEP_DAYS", "7"))
+HEALTH_TIMEOUT = int(os.environ.get("HOSTCTL_HEALTH_TIMEOUT", "180"))      # seconds a replaced container gets to become healthy before the update is rolled back
 CHECK_EVERY_S = int(os.environ.get("HOSTCTL_CHECK_HOURS", "6")) * 3600
 UNIT_CONTAINER = "atrium-container"
 PROJECT_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,60}$")
@@ -574,9 +575,9 @@ def start_container_op(op: str, project: str, user: str) -> tuple[int, dict]:
     return (200, {"ok": True}) if code == 0 else (500, {"error": "Could not start the job."})
 
 
-def wait_healthy(project: str, svcs: list[str], baseline: dict, timeout: int = 180, stable: int = 25) -> tuple[bool, str]:
+def wait_healthy(project: str, svcs: list[str], baseline: dict, timeout: int | None = None, stable: int = 25) -> tuple[bool, str]:
     """Every container of these services running (and healthy if it has a check), not restarting, and stable for a while."""
-    deadline, good_since = now() + timeout, None
+    deadline, good_since = now() + (timeout or HEALTH_TIMEOUT), None
     while now() < deadline:
         ok, why = True, ""
         for svc in svcs:
