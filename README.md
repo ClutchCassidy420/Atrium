@@ -28,7 +28,7 @@ pip install -r requirements.txt
 python demo/run_demo.py
 ```
 
-Open <http://localhost:8770> and sign in as `demo` / `demo-demo-demo`. Everything the demo creates lives in `demo/.demo-data/`
+Open <http://127.0.0.1:8770> and sign in as `demo` / `demo-demo-demo`. Everything the demo creates lives in `demo/.demo-data/`
 and is rebuilt on every start. Nothing real is read or sent anywhere.
 
 Pages that need extra services are not part of the demo: the Live agent (a 3D character file), the coding workspace (its sidecar)

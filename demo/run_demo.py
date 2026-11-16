@@ -73,9 +73,20 @@ def main() -> int:
         store.set_name(USER, "Demo")
     except Exception:       # noqa: BLE001 - the greeting name is optional
         pass
+    import socket
     import uvicorn
     from main import make_app
-    print("\nAtrium demo: http://localhost:%d   sign in as  %s / %s\n(sample data only; Ctrl+C to stop)\n" % (PORT, USER, PASSWORD))
+    probe = socket.socket()
+    try:
+        probe.bind(("127.0.0.1", PORT))
+    except OSError:
+        print("\nPort %d is already in use, so the demo cannot start there. Close whatever uses it, or pick another port:\n"
+              "  DEMO_PORT=8780 python demo/run_demo.py     (PowerShell: $env:DEMO_PORT=8780; python demo/run_demo.py)\n" % PORT, flush=True)
+        return 1
+    finally:
+        probe.close()
+    print("\nAtrium demo is starting. Open  http://127.0.0.1:%d  and sign in as  %s / %s\n(sample data only; press Ctrl+C to stop)\n"
+          % (PORT, USER, PASSWORD), flush=True)
     uvicorn.run(make_app(), host="127.0.0.1", port=PORT, log_level="warning")
     return 0
 
