@@ -16,7 +16,7 @@ person, a company or a host.
 ## Settings, in three layers (a later one wins)
 
 1. Built-in defaults (generic).
-2. `INSTANCE_DIR/instance.toml`: `brand`, `agent_name`, `trusted_proxies`, `pages_disabled`, `bootstrap_user`, `[login]`, `[roles]`.
+2. `INSTANCE_DIR/instance.toml`: `brand`, `agent_name`, `trusted_proxies`, `pages_disabled`, `bootstrap_user`, `[login]`, `[roles]`, `[redirects]` (old address = current address, so links in old notifications and bookmarks still land on the right page).
 3. Environment: `DATA_DIR`, `INSTANCE_DIR`, `TRUSTED_PROXIES`, `HERMES_API_BASE`, `HERMES_API_KEY`, `HERMES_DASHBOARD_BASE`,
    `HERMES_DASHBOARD_TOKEN`, `HERMES_DATA_DIR`, `OWNER_PASSWORD_HASH` (optional, only to create the first owner).
 

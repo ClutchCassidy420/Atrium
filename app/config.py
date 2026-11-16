@@ -31,6 +31,7 @@ class Config:
     trusted_proxies: list[str] = field(default_factory=list)   # addresses allowed to tell us the real client address
     roles: dict[str, list[str]] = field(default_factory=lambda: {k: list(v) for k, v in DEFAULT_ROLES.items()})
     pages_disabled: list[str] = field(default_factory=list)    # page ids to hide
+    redirects: dict = field(default_factory=dict)              # old address -> current address (links in old notifications and bookmarks keep working)
     nav_icons: dict = field(default_factory=dict)              # sidebar section or folder name -> a symbol or emoji
     nav_groups: list[str] = field(default_factory=list)        # sidebar sections in this order (others follow alphabetically)
     max_fails: int = 5                       # wrong passwords before a lockout
@@ -80,6 +81,8 @@ def load(env: dict | None = None) -> Config:
         cfg.pages_disabled = [str(x) for x in data.get("pages_disabled", cfg.pages_disabled)]
         cfg.nav_groups = [str(x) for x in data.get("nav_groups", cfg.nav_groups)]
         cfg.nav_icons = {str(k)[:40]: str(v)[:8] for k, v in dict(data.get("nav_icons", {}) or {}).items()}
+        cfg.redirects = {str(k)[:80]: str(v)[:80] for k, v in dict(data.get("redirects", {}) or {}).items()
+                         if str(k).startswith("/") and str(v).startswith("/") and not str(k).startswith("//") and not str(v).startswith("//") and str(k) != str(v)}
         login = data.get("login", {})
         cfg.max_fails = int(login.get("max_fails", cfg.max_fails))
         cfg.lock_minutes = int(login.get("lock_minutes", cfg.lock_minutes))

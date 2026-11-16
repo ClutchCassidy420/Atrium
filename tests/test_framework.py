@@ -218,3 +218,21 @@ def test_nav_groups_come_from_the_instance_file(tmp_path):
     (tmp_path / "instance.toml").write_text('nav_groups = ["Agent", "Server"]\n')
     c = configmod.load({"INSTANCE_DIR": str(tmp_path), "DATA_DIR": str(tmp_path / "d")})
     assert c.nav_groups == ["Agent", "Server"]
+
+
+def test_old_addresses_in_the_instance_file_redirect_to_the_current_page(make, cfg):
+    cfg.redirects = {"/old-chat": "/chat", "/old-home": "/", "//evil.example": "/chat"}
+    c = make()
+    r = c.get("/old-chat?approvals=1")
+    assert r.status_code == 303 and r.headers["location"] == "/chat?approvals=1"          # the query string survives
+    assert c.get("/old-home").status_code == 303
+    assert "evil.example" not in c.get("//evil.example").headers.get("location", "")      # nothing that leaves the site
+    assert c.get("/chat").status_code in (200, 303)                                       # real pages are never replaced
+
+
+def test_redirects_are_read_and_checked_from_the_instance_file(tmp_path):
+    inst = tmp_path / "inst"
+    inst.mkdir()
+    (inst / "instance.toml").write_text('[redirects]\n"/a" = "/chat"\n"b" = "/chat"\n"//c" = "/chat"\n"/d" = "//evil.example"\n"/e" = "/e"\n')
+    cfg = configmod.load({"INSTANCE_DIR": str(inst), "DATA_DIR": str(tmp_path / "d")})
+    assert cfg.redirects == {"/a": "/chat"}

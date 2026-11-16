@@ -427,6 +427,11 @@ def make_app(cfg: configmod.Config | None = None, hermes: Hermes | None = None, 
         for alias in pg.get("aliases", []):
             add_alias(alias, pg["path"])        # old addresses (such as links in earlier notifications) land on the page
 
+    taken = {pg["path"] for pg in pages} | {a for pg in pages for a in pg.get("aliases", [])}
+    for old, new in cfg.redirects.items():
+        if old not in taken and old != "/" and not old.startswith("//") and not new.startswith("//"):
+            add_alias(old, new)                  # an install's own list of old addresses (the instance file's [redirects])
+
     app.state.chat_owners = mount_chat(app, cfg, hermes, current, same_origin)
     mount_code(app, cfg, hermes, current, same_origin, app.state.chat_owners)
     mount_owner_pages(app, cfg, hermes, current, same_origin)

@@ -6,6 +6,10 @@ bootstrap_user = "owner"       # the first owner, created from OWNER_PASSWORD_HA
 pages_disabled = []            # page ids to hide
 nav_groups = []                # sidebar sections in this order, e.g. ["Agent", "Server"]; any others follow alphabetically
 
+# Old addresses that should still work (a link in an old notification, a bookmark): old path = current path.
+# [redirects]
+# "/old-chat" = "/chat"
+
 [login]
 max_fails = 5
 lock_minutes = 15
