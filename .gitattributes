@@ -1,3 +1,8 @@
 * text=auto eol=lf
 *.png binary
 *.glb binary
+
+# keep the language bar honest: bundled third-party code is not ours
+app/static/vendor/** linguist-vendored
+app/static/pages/live/engine.js linguist-vendored
+docs/screenshots/** linguist-documentation

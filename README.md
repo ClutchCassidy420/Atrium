@@ -1,5 +1,7 @@
 # Atrium
 
+[![tests](https://github.com/ClutchCassidy420/atrium/actions/workflows/tests.yml/badge.svg)](https://github.com/ClutchCassidy420/atrium/actions/workflows/tests.yml) [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 **A private, installable web app for your AI agent.** Chat, a mission-control home screen, scheduled jobs, a notes graph, a
 kanban board, approvals, phone notifications and a coding workspace, in one place, with real sign-in and per-person data.
 Built for [Hermes Agent](https://github.com/NousResearch/hermes-agent) and meant to run on your own hardware: no subscription,
