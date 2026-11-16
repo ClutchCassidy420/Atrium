@@ -14,6 +14,8 @@ no cloud account needed.
 | ![Chat with tool activity](docs/screenshots/chat.png) | ![Notes as a graph](docs/screenshots/memory.png) |
 | **Workflows** | **Kanban** |
 | ![Scheduled jobs](docs/screenshots/workflows.png) | ![Kanban board](docs/screenshots/kanban.png) |
+| **Server actions** | |
+| ![Reboot countdown with cancel](docs/screenshots/server.png) | |
 
 Works on a phone, too, and installs as an app:
 
@@ -44,6 +46,7 @@ and the Room (a model key).
 - **Agentic coding**: projects, sessions, tool blocks, restore points, files, diffs, a terminal and a shared browser (needs the sidecar in `code-sidecar/`).
 - **Live agent**: the agent on a 3D stage that speaks with lip-sync (bring your own character file).
 - **Settings, Persona, Avatar, Systems**, notifications, and an optional approval gate for actions you want to confirm.
+- **Server actions** (optional): install updates, reboot or shut down the machine from Settings, with confirmations and a cancel countdown, through a small helper that runs on the host (`host/`).
 
 One login system with users and roles. Everything personal about an install (name, brand, pages, theme, secrets) lives in a separate
 **instance folder**, so the same code runs for everyone. See [docs/FRAMEWORK.md](docs/FRAMEWORK.md).

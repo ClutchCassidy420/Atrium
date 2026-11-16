@@ -124,3 +124,19 @@ capabilities, and no published ports (a reverse proxy reaches it). Keep `INSTANC
 ## Tests
 
 `pytest tests` for the server (needs `fastapi`, `httpx`, `pytest`) and `node tests/shim.test.js` for the page host (needs `jsdom`).
+
+## Server actions (optional)
+
+**Settings > Server** (owners only) installs package updates, reboots and shuts the machine down. It appears only when the install sets
+`HOST_ACTION_URL` and `HOST_ACTION_KEY`, which point at the small **host helper** in `host/` (see `host/README.md`).
+
+- The web app never runs these itself and never holds root. It forwards the request; the helper accepts it only from the listed address,
+  with the shared key, and only if the person's own session cookie is accepted by this app's `/api/gate-check` route (owners only).
+- Four fixed actions exist: update the safe packages, update the care packages (those named in `HOSTCTL_CARE`, which can restart services),
+  reboot, shut down. Nothing else can be asked of the helper.
+- Every action first shows what could go wrong right now (a chat run, a running board card, a backup) and needs a "go ahead anyway" tick
+  when something is busy. Reboot and shutdown also need a typed word and wait out a countdown that can be cancelled.
+- Updates run as their own systemd job, so they survive the app being restarted by the update; the page reports the result and whether a
+  restart is still needed. Every action is logged with who and when.
+- Routes: `GET /api/host/status`, `POST /api/host/action` (`update_safe`, `update_care`, `reboot`, `shutdown`), `POST /api/host/cancel`.
+- Home lists "N updates waiting" and points at this section when it is set up. A shutdown leaves the machine off until someone presses its power button.

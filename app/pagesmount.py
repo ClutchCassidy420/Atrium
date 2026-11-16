@@ -21,7 +21,7 @@ def prefix_for(name: str) -> str:
 def mount_owner_pages(app, cfg, hermes, current, same_origin) -> None:
     if cfg.hermes_data_dir:
         os.environ["HERMES_HOME"] = cfg.hermes_data_dir
-    import kanban_backend, pipeline_backend, live_backend, memory_backend, mission_backend, room_backend, settings_backend, workflows_backend
+    import kanban_backend, pipeline_backend, live_backend, memory_backend, mission_backend, room_backend, settings_backend, workflows_backend, hostctl_backend
     vault = os.path.join(cfg.hermes_data_dir or "/opt/data", "obsidian-vault")
     os.environ["OBSIDIAN_VAULT_PATH"] = vault
     mission_backend.HERMES = hermes
@@ -44,6 +44,10 @@ def mount_owner_pages(app, cfg, hermes, current, same_origin) -> None:
     for name in OWNER_PLUGINS:
         app.include_router(backends[name].router, prefix=prefix_for(name), dependencies=[Depends(guard)])
 
+    hostctl_backend.configure(cfg, hermes)
+    import overview
+    overview.HOST_ACTIONS = bool(cfg.host_action_url and cfg.host_action_key)
+    app.include_router(hostctl_backend.router, prefix="/api/host", dependencies=[Depends(guard)])
     app.include_router(kanban_backend.router, prefix="/api/kanban", dependencies=[Depends(guard)])
     pipeline_backend.configure(cfg, hermes, app)
     app.include_router(pipeline_backend.router, prefix="/api/pipeline", dependencies=[Depends(guard)])

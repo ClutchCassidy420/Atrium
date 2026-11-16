@@ -48,6 +48,8 @@ class Config:
     code_url: str = ""                         # the coding workspace service (optional; see code-sidecar/)
     code_token: str = ""                       # the secret shared with it
     action_gate_url: str = ""                  # the approval service for proposed actions (optional)
+    host_action_url: str = ""                  # the host helper for server actions: updates, reboot, shutdown (optional)
+    host_action_key: str = ""                  # the shared key the helper expects
     deck_dir: str = ""                       # folder of status files written by this install's own jobs (monitors, system, weather...)
     systems: dict = field(default_factory=dict)   # the services, websites and model lists to show (instance systems.json)
 
@@ -100,6 +102,8 @@ def load(env: dict | None = None) -> Config:
     cfg.push_enabled = e.get("PUSH_ENABLED", "") == "1"
     cfg.push_proxy = e.get("PUSH_PROXY", "")
     cfg.action_gate_url = e.get("ACTION_GATE_URL", "")
+    cfg.host_action_url = e.get("HOST_ACTION_URL", "")
+    cfg.host_action_key = e.get("HOST_ACTION_KEY", "")
     sysf = cfg.instance_dir / "systems.json"
     if sysf.is_file():
         try:

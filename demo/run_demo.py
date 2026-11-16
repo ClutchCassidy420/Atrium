@@ -20,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 PORT = int(os.environ.get("DEMO_PORT", "8770"))
 HERMES_PORT = int(os.environ.get("DEMO_HERMES_PORT", "8791"))
+HOST_PORT = int(os.environ.get("DEMO_HOST_PORT", "8792"))
 USER, PASSWORD = "demo", "demo-demo-demo"
 
 
@@ -59,11 +60,14 @@ def main() -> int:
     data, instance, hermes = build_data(base)
     import fake_hermes
     fake_hermes.serve(HERMES_PORT)
+    import fake_host
+    fake_host.serve(HOST_PORT)
     os.environ.update({
         "DATA_DIR": str(data), "INSTANCE_DIR": str(instance), "HERMES_HOME": str(hermes), "HERMES_DATA_DIR": str(hermes),
         "OBSIDIAN_VAULT_PATH": str(hermes / "obsidian-vault"), "TRUSTED_PROXIES": "127.0.0.1",
         "HERMES_API_BASE": "http://127.0.0.1:%d" % HERMES_PORT, "HERMES_API_KEY": "demo-key",
         "HERMES_DASHBOARD_BASE": "http://127.0.0.1:%d" % HERMES_PORT, "HERMES_DASHBOARD_TOKEN": "demo-token",
+        "HOST_ACTION_URL": "http://127.0.0.1:%d" % HOST_PORT, "HOST_ACTION_KEY": fake_host.KEY,
     })
     import auth
     from users import UserStore

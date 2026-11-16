@@ -1,0 +1,14 @@
+[Unit]
+Description=Atrium host helper (package updates, reboot and shutdown for the web app)
+After=docker.service network-online.target
+Wants=docker.service
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/atrium/hostctl.env
+ExecStart=/usr/bin/python3 /usr/local/sbin/atrium-hostctl.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

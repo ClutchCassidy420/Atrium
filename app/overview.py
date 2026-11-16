@@ -135,6 +135,9 @@ def board_summary(board) -> dict:
 
 # ---- the "needs you" list -------------------------------------------------------------------------------------------------
 
+HOST_ACTIONS = False      # set by the app when this install has a host helper (Settings > Server)
+
+
 def build_attention(jobs, board, monitors, system, extra, agent, now: float, infra: bool) -> list[dict]:
     items: list[dict] = []
 
@@ -167,7 +170,8 @@ def build_attention(jobs, board, monitors, system, extra, agent, now: float, inf
         if sec.get("reboot_required"):
             add("warn", "security", "A restart is needed to finish updates")
         if (sec.get("pending_updates") or 0) > 0:
-            add("info", "security", "%d update%s waiting" % (sec["pending_updates"], "" if sec["pending_updates"] == 1 else "s"))
+            add("info", "security", "%d update%s waiting" % (sec["pending_updates"], "" if sec["pending_updates"] == 1 else "s"),
+                "Install them from Settings, Server." if HOST_ACTIONS else "")
         if sec.get("cert_days_left") is not None and sec["cert_days_left"] < 21:
             add("warn", "security", "A certificate expires in %d days" % sec["cert_days_left"])
         if (sec.get("failed_ssh_24h") or 0) > 0:

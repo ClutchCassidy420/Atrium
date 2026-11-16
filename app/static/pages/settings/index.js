@@ -284,7 +284,8 @@
     { id: "persona", label: "Persona", icon: "🎭", note: "Who the agent is and the rules she works by, with every earlier version kept.", parts: [embed("persona", "The persona editor did not load.")] },
     { id: "avatar", label: "Avatar", icon: "🎨", note: "Pick and customise how the agent looks.", parts: [embed("avatar", "The avatar editor did not load.")] },
     { id: "memory", label: "Memory", icon: "🧠", note: "The agent's notes as a graph: every note a dot, every link a line. Read only.", parts: [embed("memory", "The memory view did not load.")] },
-    { id: "engine", label: "Cloud use", icon: "☁️", note: "Which engine answers chats from the app, and what the cloud has used.", parts: [Cloud] }
+    { id: "engine", label: "Cloud use", icon: "☁️", note: "Which engine answers chats from the app, and what the cloud has used.", parts: [Cloud] },
+    { id: "server", label: "Server", icon: "🖥️", note: "Install updates, reboot or shut down the machine this runs on. Owners only.", parts: [embed("server", "The server actions did not load.")], hostOnly: true }
   ];
 
   function startSection() {
@@ -299,14 +300,19 @@
       window.addEventListener("hashchange", onHash);
       return function () { window.removeEventListener("hashchange", onHash); };
     }, []);
+    var hs_ = useState(false), hostOn = hs_[0], setHostOn = hs_[1];       // the Server section appears only when this install has a host helper
+    useEffect(function () {
+      fetchJSON("/api/host/status").then(function (j) { setHostOn(!!(j && j.enabled)); }).catch(function () { /* stays hidden */ });
+    }, []);
+    var visible = SECTIONS.filter(function (x) { return !x.hostOnly || hostOn; });
     function pick(id) { setCur(id); try { window.history.replaceState(null, "", "#" + id); } catch (x) { /* ignore */ } }
-    var sec = SECTIONS.filter(function (x) { return x.id === cur; })[0] || SECTIONS[0];
+    var sec = visible.filter(function (x) { return x.id === cur; })[0] || visible[0];
     return h("div", { className: "ats-page" },
       h("div", { className: "ats-title" }, "Settings"),
       h("div", { className: "ats-layout" },
-        h("nav", { className: "ats-nav", "aria-label": "Settings sections" }, SECTIONS.map(function (x) {
+        h("nav", { className: "ats-nav", "aria-label": "Settings sections" }, visible.map(function (x) {
           return h("button", { key: x.id, type: "button", className: "ats-navitem" + (x.id === sec.id ? " ats-current" : ""), "aria-current": x.id === sec.id ? "page" : null, onClick: function () { pick(x.id); } },
-            h("span", { className: "ats-navicon", "aria-hidden": "true", style: { "--h": ({ general: 215, notifications: 40, schedule: 150, persona: 320, avatar: 275, memory: 185, engine: 205 })[x.id] || 260 } }, x.icon), x.label);
+            h("span", { className: "ats-navicon", "aria-hidden": "true", style: { "--h": ({ general: 215, notifications: 40, schedule: 150, persona: 320, avatar: 275, memory: 185, engine: 205, server: 25 })[x.id] || 260 } }, x.icon), x.label);
         })),
         h("section", { className: "ats-panel", key: sec.id },
           h("h2", { className: "ats-panel-h" }, sec.label),

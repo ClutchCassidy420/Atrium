@@ -210,11 +210,11 @@ def owner_live(owner):
         yield owner
 
 
-def _wait_room(c, rid):
+def _wait_room(c, rid, messages=0):
     import time as _t
-    for _ in range(100):
+    for _ in range(200):
         r = c.get("/api/plugins/atrium-room/rooms/" + rid).json()
-        if not r["running"]:
+        if not r["running"] and len(r["messages"]) >= messages:       # not running AND the turn's messages are in (the run may not have started yet)
             return r
         _t.sleep(0.05)
     raise AssertionError("room never finished")
@@ -230,7 +230,7 @@ def test_room_talks_and_hands_back(owner_live, monkeypatch):
     assert owner.get("/api/plugins/atrium-room/models").json()["claude_available"] is True
     rid = owner.post("/api/plugins/atrium-room/rooms", json={"title": "Plans"}, headers=H).json()["id"]
     assert owner.post("/api/plugins/atrium-room/rooms/%s/send" % rid, json={"text": "@Robo should we?"}, headers=H).json() == {"ok": True}
-    room = _wait_room(owner, rid)
+    room = _wait_room(owner, rid, messages=4)
     assert [m["who"] for m in room["messages"]] == ["system", "owner", "agent", "claude"]
     assert asked == ["agent", "claude:claude-sonnet-5-5"]
     assert room["usage"] == {"in": 100, "out": 20}

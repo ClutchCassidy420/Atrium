@@ -62,3 +62,20 @@
   .ats-nav { position: static; flex-direction: row; overflow-x: auto; gap: 6px; padding-bottom: 4px; }
   .ats-navitem { width: auto; flex: none; white-space: nowrap; border: 1px solid var(--ats-border); }
 }
+
+/* Settings > Server */
+.ats-server { display: flex; flex-direction: column; gap: 0.9rem; }
+.ats-grid-2 { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+.ats-sub-card { display: flex; flex-direction: column; gap: 0.45rem; align-items: flex-start; padding: 0.8rem 0.9rem; border: 1px solid var(--ats-border); border-radius: 12px; }
+.ats-sub-care { border-color: rgba(255, 190, 90, 0.45); }
+.ats-pkgs { font-size: 0.76rem; color: var(--ats-muted); }
+.ats-pkgs summary { cursor: pointer; }
+.ats-pkgs ul { margin: 0.3rem 0 0; padding-left: 1.1rem; max-height: 9rem; overflow: auto; }
+.ats-confirm { display: flex; flex-direction: column; gap: 0.55rem; padding: 0.9rem 1rem; border: 1px solid var(--ats-primary); border-radius: 14px; background: rgba(139, 123, 255, 0.08); }
+.ats-confirm-danger { border-color: var(--ats-bad); background: rgba(255, 92, 122, 0.08); }
+.ats-checks { margin: 0; padding: 0; list-style: none; font-size: 0.82rem; display: flex; flex-direction: column; gap: 0.2rem; }
+.ats-okline { color: var(--ats-ok); }
+.ats-warn { color: #ffbe5a; }
+.ats-btn-danger { border-color: var(--ats-bad); color: var(--ats-bad); }
+.ats-btn-danger:hover:not(:disabled) { background: rgba(255, 92, 122, 0.14); }
+.ats-log { margin: 0; padding: 0; list-style: none; font-size: 0.8rem; display: flex; flex-direction: column; gap: 0.3rem; }
