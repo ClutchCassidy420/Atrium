@@ -1,0 +1,24 @@
+# real hostnames, addresses, keys and passwords
+config.private.*
+!config.private.example
+*.env
+.env*
+secrets/
+*.key
+*.pem
+
+# this install's own files (the example is committed, the real one is not)
+/instance/
+/deploy/compose.yaml
+
+# build and tooling
+node_modules/
+dist/
+__pycache__/
+*.pyc
+.venv/
+*.log
+
+# private checks (names/hosts of your own install)
+tests/banned-terms.txt
+demo/.demo-data/

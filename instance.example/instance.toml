@@ -1,0 +1,16 @@
+# This install's own settings. Copy this folder to wherever INSTANCE_DIR points and edit it. Nothing here is secret.
+brand = "Atrium"            # shown in the title and the top bar
+agent_name = "Assistant"       # what the pages call the agent
+trusted_proxies = []           # addresses of your reverse proxy; only these may tell the app the real client address
+bootstrap_user = "owner"       # the first owner, created from OWNER_PASSWORD_HASH if no users exist yet (optional)
+pages_disabled = []            # page ids to hide
+nav_groups = []                # sidebar sections in this order, e.g. ["Agent", "Server"]; any others follow alphabetically
+
+[login]
+max_fails = 5
+lock_minutes = 15
+
+# Roles and what each may do. "*" is everything; pages ask for a permission such as "use".
+# [roles]
+# owner = ["*"]
+# user = ["use"]

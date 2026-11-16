@@ -1,0 +1,39 @@
+# Example deployment of the app. Copy to your server as compose.yaml and fill in the values for your install.
+# Secrets and addresses go in config.private.env (never committed); names, brand and pages go in the instance folder.
+services:
+  webapp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: atrium:1
+    container_name: atrium
+    user: "10001:2000"                  # the app user, with the agent's group as the main group (2000 here: use your agent's gid)
+    restart: unless-stopped
+    env_file:
+      - ./config.private.env            # HERMES_* settings (see config.private.example); no passwords live here any more
+    environment:
+      DATA_DIR: /data                   # users.json and sessions.json (writable)
+      INSTANCE_DIR: /instance           # instance.toml, theme.css, pages.d/, static/ (read-only)
+    networks:
+      core: {}                          # the network your reverse proxy shares with this container
+      hermes-api: {}                    # a private network shared ONLY with Hermes, so its API is not exposed to other containers
+    volumes:
+      - ./data:/data
+      - ./instance:/instance:ro
+      # The agent's data folders, at the SAME path the agent sees them (she is handed uploaded files by path).
+      # Only atrium is writable; before starting, run:  chmod g+rwxs <data>/atrium <data>/atrium/uploads <data>/atrium/kept-docs
+      - /path/to/hermes/data/atrium:/opt/data/atrium
+      - /path/to/hermes/data/cron:/opt/data/cron:ro
+      - /path/to/hermes/data/obsidian-vault:/opt/data/obsidian-vault:ro
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,nosuid
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 100
+    mem_limit: 256m
+networks:
+  core:
+    external: true
+  hermes-api:
+    external: true

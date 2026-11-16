@@ -1,0 +1,48 @@
+/* Atrium Loom: Workflows */
+.atw-page {
+  --atw-primary: var(--color-primary, #8b7bff);
+  --atw-accent: var(--color-accent, #ff6fb5);
+  --atw-ok: var(--color-success, #38e1a5);
+  --atw-warn: var(--color-warning, #ffc857);
+  --atw-bad: var(--color-destructive, #ff5c7a);
+  --atw-border: var(--color-border, rgba(160, 170, 255, 0.16));
+  --atw-muted: var(--color-muted-foreground, #8b94b8);
+  max-width: 1180px; margin: 0 auto; padding: 1.2rem 1rem 3rem; display: flex; flex-direction: column; gap: 1rem;
+}
+.atw-title { font-size: 1.6rem; font-weight: 800; letter-spacing: -0.01em; }
+.atw-sub { color: var(--atw-muted); font-size: 0.85rem; margin-top: -0.6rem; }
+.atw-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 1rem; }
+.atw-grid-2 { grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); }
+.atw-card { display: flex; flex-direction: column; gap: 0.55rem; padding: 1rem 1.1rem; border: 1px solid var(--atw-border); border-radius: 16px; background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.015)); box-shadow: 0 14px 36px -22px rgba(0, 0, 0, 0.8); }
+.atw-card-head { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; }
+.atw-name { font-weight: 700; font-size: 1rem; }
+.atw-when { font-size: 0.86rem; color: #dfe4ff; }
+.atw-meta { display: flex; flex-direction: column; gap: 0.15rem; font-size: 0.76rem; color: var(--atw-muted); }
+.atw-note { font-size: 0.78rem; color: var(--atw-muted); line-height: 1.45; }
+.atw-err { font-size: 0.8rem; color: var(--atw-bad); }
+.atw-msg { font-size: 0.8rem; color: var(--atw-accent); }
+.atw-answer { font-size: 0.78rem; line-height: 1.45; color: #cfd6f5; padding: 0.5rem 0.65rem; border-radius: 10px; background: rgba(0, 0, 0, 0.28); border: 1px solid var(--atw-border); max-height: 6.5rem; overflow: hidden; }
+.atw-answer span { color: var(--atw-muted); }
+.atw-actions { display: flex; gap: 0.5rem; margin-top: 0.2rem; }
+.atw-btn { padding: 0.4rem 0.9rem; font: inherit; font-size: 0.8rem; font-weight: 600; color: inherit; cursor: pointer; border: 1px solid var(--atw-border); border-radius: 10px; background: rgba(255, 255, 255, 0.05); }
+.atw-btn:hover:not(:disabled) { border-color: var(--atw-accent); }
+.atw-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.atw-btn-primary { background: linear-gradient(90deg, var(--atw-primary), #6f8bff); color: #0a0d1c; border-color: transparent; }
+.atw-pill { padding: 0.12rem 0.6rem; font-size: 0.68rem; font-weight: 700; letter-spacing: 0.04em; border-radius: 999px; border: 1px solid var(--atw-border); white-space: nowrap; }
+.atw-pill-ok { color: var(--atw-ok); border-color: rgba(56, 225, 165, 0.4); }
+.atw-pill-run { color: var(--atw-warn); border-color: rgba(255, 200, 87, 0.5); }
+.atw-pill-off { color: var(--atw-muted); }
+.atw-pill-bad { color: var(--atw-bad); border-color: rgba(255, 92, 122, 0.5); }
+.atw-chips { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.atw-chip { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.2rem 0.3rem 0.2rem 0.7rem; font-size: 0.78rem; border-radius: 999px; border: 1px solid var(--atw-border); background: rgba(139, 123, 255, 0.12); }
+.atw-chip button { width: 1.2rem; height: 1.2rem; padding: 0; font-size: 0.62rem; line-height: 1; color: var(--atw-muted); cursor: pointer; border: 0; border-radius: 50%; background: rgba(255, 255, 255, 0.08); }
+.atw-chip button:hover { color: var(--atw-bad); }
+.atw-add { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.atw-input { flex: 1; min-width: 160px; padding: 0.4rem 0.7rem; font: inherit; font-size: 0.82rem; color: inherit; border: 1px solid var(--atw-border); border-radius: 10px; background: rgba(0, 0, 0, 0.3); }
+.atw-input:focus { outline: none; border-color: var(--atw-accent); }
+.atw-feed { display: flex; flex-direction: column; gap: 0.35rem; max-height: 340px; overflow-y: auto; }
+.atw-feed-row { display: grid; grid-template-columns: 6.2rem 9rem 1fr; gap: 0.5rem; font-size: 0.76rem; line-height: 1.4; }
+.atw-feed-t { color: var(--atw-muted); }
+.atw-feed-a { font-weight: 600; }
+.atw-feed-s { color: #cfd6f5; word-break: break-word; }
+@media (max-width: 700px) { .atw-feed-row { grid-template-columns: 1fr; gap: 0.05rem; } .atw-grid { grid-template-columns: 1fr; } }

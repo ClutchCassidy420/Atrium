@@ -1,0 +1,45 @@
+{
+  "services": [
+    {
+      "name": "Files",
+      "url": "https://files.example.org",
+      "monitor": "Files"
+    },
+    {
+      "name": "Mail",
+      "url": "https://mail.example.org",
+      "monitor": "Mail"
+    },
+    {
+      "name": "Password manager",
+      "url": "https://vault.example.org",
+      "monitor": null
+    }
+  ],
+  "websites": [
+    {
+      "name": "example.org",
+      "monitor": "Site example.org"
+    }
+  ],
+  "local_models": [
+    {
+      "name": "Model A",
+      "role": "main model"
+    },
+    {
+      "name": "Speech-to-text",
+      "role": "speech in"
+    }
+  ],
+  "external": [
+    {
+      "name": "Mail provider",
+      "role": "mail"
+    },
+    {
+      "name": "Weather service",
+      "role": "weather"
+    }
+  ]
+}

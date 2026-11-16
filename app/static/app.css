@@ -1,0 +1,14 @@
+/* Base styles, shared by the sign-in page and the shell. Form controls are styled only inside the sign-in card, so the pages loaded into the shell keep their own. Colors, radius and fonts come from tokens.css only. */
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%}
+body{background:var(--page-background) fixed;color:var(--color-foreground);font:16px/1.5 var(--font-sans);display:flex;align-items:center;justify-content:center;padding:16px}
+.card{width:100%;max-width:380px;background:var(--color-card);border:1px solid var(--color-border);border-radius:var(--radius);padding:28px 24px}
+h1{margin:0 0 4px;font-size:1.6rem;letter-spacing:.01em}
+.sub{margin:0 0 20px;color:var(--color-muted-foreground)}
+.card label{display:block;font-size:.85rem;color:var(--color-muted-foreground);margin:14px 0 6px}
+.card input{width:100%;padding:12px 14px;border-radius:10px;border:1px solid var(--color-border);background:var(--color-muted);color:var(--color-foreground);font:inherit}
+.card input:focus,.card button:focus-visible,a:focus-visible{outline:2px solid var(--color-ring);outline-offset:2px}
+.card button{margin-top:18px;width:100%;padding:12px 14px;border:0;border-radius:10px;background:var(--color-primary);color:var(--color-primary-foreground);font:inherit;font-weight:600;cursor:pointer}
+.card button:disabled{opacity:.5;cursor:not-allowed}
+a{color:var(--color-accent)}
+.err{color:var(--color-destructive);margin:0 0 6px}
