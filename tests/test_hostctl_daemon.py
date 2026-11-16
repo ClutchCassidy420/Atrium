@@ -298,3 +298,21 @@ def test_updating_a_digest_pinned_group_moves_the_pin_and_a_rollback_moves_it_ba
     assert hc.run_container("container_rollback", "llama") == 0
     assert "image: ghcr.io/x/llama@sha256:old" in compose.read_text()                  # back to the exact build that worked
     assert any(c[:2] == ["docker", "tag"] and c[3] == "ghcr.io/x/llama:server-cuda13" for c in calls)      # the tag is given back to the old build
+
+
+def test_services_that_share_one_image_line_both_count_as_updated(hc, tmp_path):
+    f = tmp_path / "compose.yaml"
+    f.write_text("x-nc: &nc\n  image: nextcloud:35.0.2-apache\nservices:\n  app:\n    <<: *nc\n  cron:\n    <<: *nc\n")
+    assert hc.edit_image_line(str(f), "nextcloud:35.0.2-apache", "nextcloud:35.0.3-apache")        # the first service moves the shared line
+    assert hc.edit_image_line(str(f), "nextcloud:35.0.2-apache", "nextcloud:35.0.3-apache")        # the second finds it already moved: still success
+    assert f.read_text().count("35.0.3-apache") == 1
+    assert not hc.edit_image_line(str(f), "other:1.0", "other:2.0")                                  # a line that was never there still fails
+
+
+def test_a_failed_update_leaves_no_restore_point_to_roll_back_to(hc, monkeypatch, tmp_path):
+    compose = _pinned_setup(hc, monkeypatch, tmp_path)
+    compose.write_text("services:\n  s:\n    image: something/else:9.9\n")                         # the line cannot be found, so the update cannot be applied
+    monkeypatch.setattr(hc, "run", lambda cmd, timeout=60, env=None: (0, "[]") if cmd[:2] == ["docker", "inspect"] else (0, ""))
+    monkeypatch.setattr(hc, "wait_healthy", lambda *a, **k: (True, ""))
+    assert hc.run_container("container_update", "voice") == 1
+    assert hc.container_state()["restore_points"] == {}                                              # nothing misleading offered as a rollback

@@ -642,7 +642,9 @@ def edit_image_line(path: str, old_ref: str, new_ref: str) -> bool:
     new, n = pat.subn(lambda m: m.group(1) + new_ref + m.group(2), text)
     if n:
         p.write_text(new, encoding="utf-8")
-    return n > 0
+        return True
+    # several services can share one image line (a YAML anchor); an earlier service already moved it
+    return bool(re.search(r"^\s*image:\s*[\"']?" + re.escape(new_ref) + r"[\"']?\s*(?:#.*)?$", text, re.M))
 
 
 def run_container(op: str, project: str) -> int:
@@ -669,6 +671,14 @@ def run_container(op: str, project: str) -> int:
         return finish(False, "that group is not running")
     cached = {p["project"]: p for p in container_state()["projects"]}.get(project, {})
     base = {r["Name"].lstrip("/"): r.get("RestartCount", 0) for r in json.loads(run(["docker", "inspect"] + [c for s in g["services"].values() for c in s["containers"]], 60)[1] or "[]")}
+
+    def abandon(point: dict) -> None:
+        """An update that did not take leaves nothing to roll back to: forget its restore point."""
+        point["rolled_back"] = True
+        try:
+            (restore_dir() / point["id"] / "point.json").write_text(json.dumps(point), encoding="utf-8")
+        except OSError:
+            pass
 
     def do_rollback(point: dict, why: str) -> tuple[bool, str]:
         step("rolling back")
@@ -724,27 +734,32 @@ def run_container(op: str, project: str) -> int:
                 nd = remote_digest(track) if track else ""
                 if not nd:
                     do_rollback(point, "no digest")
+                    abandon(point)
                     return finish(False, "could not find the newest build of " + (track or x["ref"]), restore_point=pid)
                 new_ref = x["ref"].split("@", 1)[0] + "@" + nd
                 if not any(edit_image_line(f, x["ref"], new_ref) for f in g["files"]):
                     do_rollback(point, "could not edit")
+                    abandon(point)
                     return finish(False, "could not change the pinned build in the compose file", restore_point=pid)
                 x["new_ref"] = new_ref
                 code, out = run(["docker", "pull", track], 1800)           # the tag moves to the new build, and the new digest is on disk
                 if code != 0:
                     ok, note = do_rollback(point, "pull failed")
+                    abandon(point)
                     return finish(False, "pull failed (%s); %s" % (out.strip().splitlines()[-1][:100] if out.strip() else "", note), restore_point=pid)
             if x["kind"] == "pinned":
                 host, repo, tag = split_ref(x["ref"])
                 new_ref = x["ref"].rsplit(":", 1)[0] + ":" + x["newer"]
                 if not any(edit_image_line(f, x["ref"], new_ref) for f in g["files"]):
                     do_rollback(point, "could not edit")
+                    abandon(point)
                     return finish(False, "could not change the version in the compose file", restore_point=pid)
                 x["new_ref"] = new_ref
         step("pulling the new build")
         code, out = run(compose_args(g) + ["pull"] + svcs, 1800)
         if code != 0:
             ok, note = do_rollback(point, "pull failed")
+            abandon(point)
             return finish(False, "pull failed (%s); %s" % (out.strip().splitlines()[-1][:100] if out.strip() else "", note), restore_point=pid)
         step("replacing the containers")
         code, out = run(compose_args(g) + ["up", "-d", "--no-deps"] + svcs, 600)
@@ -754,6 +769,7 @@ def run_container(op: str, project: str) -> int:
             ok, bad = wait_healthy(project, svcs, base)
         if not ok:
             rok, rnote = do_rollback(point, bad)
+            abandon(point)
             return finish(False, "the new build failed (%s); %s" % (bad, rnote), restore_point=pid, auto_rolled_back=True)
     prune_points()
     try:
