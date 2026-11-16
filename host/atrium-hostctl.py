@@ -423,7 +423,22 @@ def discover() -> dict:
             s["ref"] = c.get("image") or ""
             s["built"] = bool(c.get("build"))
             s["kind"] = "built" if s["built"] or not s["ref"] else ref_kind(s["ref"])
+            s["track"] = tracked_ref(s) if s["kind"] == "digest" else ""
     return groups
+
+
+def tracked_ref(s: dict) -> str:
+    """For an image fixed to an exact digest: the repository:tag it was pulled from (Docker remembers it), so newer builds of that tag can be offered."""
+    repo = s["ref"].split("@", 1)[0]
+    code, out = run(["docker", "image", "inspect", s["image_id"], "--format", "{{json .RepoTags}}"], 20)
+    try:
+        tags = json.loads(out.strip() or "[]")
+    except ValueError:
+        return ""
+    for t in tags:
+        if t.split(":", 1)[0] == repo:
+            return t
+    return ""
 
 
 def check_service(s: dict) -> dict:
@@ -442,7 +457,16 @@ def check_service(s: dict) -> dict:
             if nt:
                 out.update(update=True, newer=nt)
         elif s["kind"] == "digest":
-            out["note"] = "pinned by digest"
+            pinned = s["ref"].split("@", 1)[1]
+            if s.get("track"):
+                rd = remote_digest(s["track"])
+                out["track"] = s["track"]
+                if not rd:
+                    out.update(update=None, note="could not check (offline or rate limited)")
+                elif rd != pinned:
+                    out.update(update=True, newer="new build")
+            else:
+                out["note"] = "fixed to one exact build"
         else:
             out["note"] = "built here"
     except (urllib.error.URLError, OSError, ValueError) as exc:
@@ -655,6 +679,8 @@ def run_container(op: str, project: str) -> int:
         for s in point["services"]:
             if point["mode"] == "floating" and not DRY:
                 run(["docker", "tag", s["restore_tag"], s["ref"]], 30)       # the old build becomes the tag again
+            if s.get("track") and not DRY:
+                run(["docker", "tag", s["restore_tag"], s["track"]], 30)     # an image fixed to a digest keeps the tag it is followed by
         if not DRY:
             run(compose_args(g) + ["up", "-d", "--no-deps", "--pull", "never"] + svcs, 300)
         ok, bad = (True, "") if DRY else wait_healthy(project, svcs, {}, 120, 15)
@@ -679,7 +705,7 @@ def run_container(op: str, project: str) -> int:
     pdir = restore_dir() / pid
     (pdir / "files").mkdir(parents=True, exist_ok=True)
     step("saving a restore point")
-    point = {"id": pid, "project": project, "created": now(), "user": user, "mode": "pinned" if any(x["kind"] == "pinned" for x in todo) else "floating", "services": [], "files": {}}
+    point = {"id": pid, "project": project, "created": now(), "user": user, "mode": "pinned" if any(x["kind"] in ("pinned", "digest") for x in todo) else "floating", "services": [], "files": {}}
     for i, f in enumerate(g["files"]):
         saved = pdir / "files" / ("%d-%s" % (i, Path(f).name))
         saved.write_text(Path(f).read_text(encoding="utf-8"), encoding="utf-8")
@@ -688,11 +714,26 @@ def run_container(op: str, project: str) -> int:
         s = g["services"][x["service"]]
         tag = "atrium-restore/%s-%s:%s" % (project, s["service"], pid)
         run(["docker", "tag", s["image_id"], tag], 30)
-        point["services"].append({"service": s["service"], "ref": x["ref"], "old_image_id": s["image_id"], "restore_tag": tag, "kind": x["kind"]})
+        point["services"].append({"service": s["service"], "ref": x["ref"], "old_image_id": s["image_id"], "restore_tag": tag, "kind": x["kind"], "track": s.get("track", "")})
     (pdir / "point.json").write_text(json.dumps(point), encoding="utf-8")
     svcs = [x["service"] for x in todo]
     if not DRY:
         for x in todo:
+            if x["kind"] == "digest":
+                track = g["services"][x["service"]].get("track") or x.get("track", "")
+                nd = remote_digest(track) if track else ""
+                if not nd:
+                    do_rollback(point, "no digest")
+                    return finish(False, "could not find the newest build of " + (track or x["ref"]), restore_point=pid)
+                new_ref = x["ref"].split("@", 1)[0] + "@" + nd
+                if not any(edit_image_line(f, x["ref"], new_ref) for f in g["files"]):
+                    do_rollback(point, "could not edit")
+                    return finish(False, "could not change the pinned build in the compose file", restore_point=pid)
+                x["new_ref"] = new_ref
+                code, out = run(["docker", "pull", track], 1800)           # the tag moves to the new build, and the new digest is on disk
+                if code != 0:
+                    ok, note = do_rollback(point, "pull failed")
+                    return finish(False, "pull failed (%s); %s" % (out.strip().splitlines()[-1][:100] if out.strip() else "", note), restore_point=pid)
             if x["kind"] == "pinned":
                 host, repo, tag = split_ref(x["ref"])
                 new_ref = x["ref"].rsplit(":", 1)[0] + ":" + x["newer"]

@@ -34,7 +34,10 @@ registries whether something newer exists:
 - **Floating tags** (`latest` and the like): compares the registry's digest with the one you run. One cheap header-only request per image.
 - **Version tags** (`4.10.2.0`, `v0.23.1`): lists the registry's tags and offers the highest newer one of the **same shape and the same major
   version** (never the next major version, which can change data in ways a rollback cannot undo; for 0.x versions it stays inside the minor version).
-- Images fixed by digest and images built on the server are reported as such and never touched.
+- **Images fixed to an exact digest** (`image: repo@sha256:...`): if Docker remembers the tag the image was pulled from (for example `server-cuda13`),
+  the helper follows that tag. A newer build of the tag is offered, and an update moves the pin in the compose file to the new digest (keeping it pinned)
+  and gives the tag to the new build. A rollback moves the pin and the tag back. With no known tag, the image is reported as fixed to one exact build.
+- Images built on the server have nothing to pull and are reported as such.
 
 Every group can be updated from the page. Groups carry a **risk label** by name: `HOSTCTL_TIER_LOW` and `HOSTCTL_TIER_MEDIUM` list the low and
 medium ones, everything else is labelled **high risk**. The label only changes the confirmation: a high-risk update shows a warning that it could stop

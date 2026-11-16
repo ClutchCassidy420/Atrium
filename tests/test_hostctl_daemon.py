@@ -259,3 +259,42 @@ def test_the_page_always_shows_the_current_tiers(hc, monkeypatch, tmp_path):
     assert hc.container_state()["projects"][0]["tier"] == "high"
     monkeypatch.setattr(hc, "TIER_MEDIUM", {"files"})                      # the settings changed after the last check
     assert hc.container_state()["projects"][0]["tier"] == "medium"
+
+
+def test_an_image_fixed_to_a_digest_is_followed_by_the_tag_it_came_from(hc, monkeypatch):
+    s = {"service": "llama", "ref": "ghcr.io/x/llama@sha256:old", "image_id": "sha256:img", "kind": "digest", "built": False}
+    monkeypatch.setattr(hc, "run", lambda cmd, timeout=60, env=None: (0, '["ghcr.io/x/llama:server-cuda13"]'))
+    assert hc.tracked_ref(s) == "ghcr.io/x/llama:server-cuda13"
+    monkeypatch.setattr(hc, "run", lambda cmd, timeout=60, env=None: (0, '["other/thing:1.0"]'))
+    assert hc.tracked_ref(s) == ""                                                       # no tag known: fixed to one exact build
+    s["track"] = "ghcr.io/x/llama:server-cuda13"
+    monkeypatch.setattr(hc, "remote_digest", lambda ref: "sha256:new")
+    r = hc.check_service(s)
+    assert r["update"] is True and r["newer"] == "new build"
+    monkeypatch.setattr(hc, "remote_digest", lambda ref: "sha256:old")
+    assert hc.check_service(s)["update"] is False
+    s["track"] = ""
+    r = hc.check_service(s)
+    assert r["update"] is False and "exact build" in r["note"]
+
+
+def test_updating_a_digest_pinned_group_moves_the_pin_and_a_rollback_moves_it_back(hc, monkeypatch, tmp_path):
+    compose = tmp_path / "compose.yaml"
+    compose.write_text("services:\n  llama:\n    image: ghcr.io/x/llama@sha256:old\n")
+    group = {"project": "llama", "dir": str(tmp_path), "files": [str(compose)],
+             "services": {"llama": {"service": "llama", "containers": ["vera-llama"], "image_id": "sha256:oldimg", "ref": "ghcr.io/x/llama@sha256:old", "kind": "digest", "built": False, "track": "ghcr.io/x/llama:server-cuda13"}}}
+    monkeypatch.setattr(hc, "discover", lambda: {"llama": group})
+    monkeypatch.setattr(hc, "TIER_LOW", {"llama"})
+    monkeypatch.setattr(hc, "DRY", False)
+    monkeypatch.setattr(hc, "remote_digest", lambda ref: "sha256:new")
+    (tmp_path / "containers.json").write_text(json.dumps({"projects": {"llama": {"project": "llama", "tier": "low", "update": True, "services": [
+        {"service": "llama", "ref": "ghcr.io/x/llama@sha256:old", "kind": "digest", "update": True, "newer": "new build", "track": "ghcr.io/x/llama:server-cuda13"}]}}}))
+    calls = []
+    monkeypatch.setattr(hc, "run", lambda cmd, timeout=60, env=None: (calls.append(cmd) or ((0, "[]") if cmd[:2] == ["docker", "inspect"] else (0, ""))))
+    monkeypatch.setattr(hc, "wait_healthy", lambda *a, **k: (True, ""))
+    assert hc.run_container("container_update", "llama") == 0
+    assert "image: ghcr.io/x/llama@sha256:new" in compose.read_text()                  # the pin moved to the new build
+    assert ["docker", "pull", "ghcr.io/x/llama:server-cuda13"] in calls                # and the tag followed it
+    assert hc.run_container("container_rollback", "llama") == 0
+    assert "image: ghcr.io/x/llama@sha256:old" in compose.read_text()                  # back to the exact build that worked
+    assert any(c[:2] == ["docker", "tag"] and c[3] == "ghcr.io/x/llama:server-cuda13" for c in calls)      # the tag is given back to the old build
