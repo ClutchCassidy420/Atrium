@@ -48,8 +48,10 @@ class Helper(Quiet):        # a stand-in for the host helper
     def do_GET(self):
         if self.headers.get("X-Hostctl-Key") != KEY:
             return self.reply(403, {"error": "Not allowed."})
+        if self.path.split("?")[0] == "/containers":
+            return self.reply(200, {"projects": [{"project": "voice", "tier": "low", "update": True, "services": []}], "keep_days": 7, "op": None, "restore_points": {}})
         self.reply(200, {"packages": {"safe": [{"name": "vim", "from": "1", "to": "2"}], "care": []}, "backup_running": STATE["backup"],
-                         "update": {"running": False}, "scheduled": None, "log": []})
+                         "update": {"running": False}, "scheduled": None, "log": [], "containers": {"updates": 2}})
 
     def do_POST(self):
         n = int(self.headers.get("Content-Length") or 0)
@@ -140,3 +142,36 @@ def test_a_helper_that_is_down_is_reported_not_crashed(host):
     j = host.get("/api/host/status").json()
     assert j["enabled"] and j["reachable"] is False
     assert host.post("/api/host/action", json={"action": "reboot"}, headers=H).status_code == 502
+
+
+def test_container_routes_are_owner_only_and_validated(host):
+    assert host.get("/api/host/containers").json()["projects"][0]["project"] == "voice"
+    for bad in ("../etc", "UPPER", "a b", ""):
+        assert host.post("/api/host/containers/update", json={"project": bad}, headers=H).status_code == 422
+        assert host.post("/api/host/containers/rollback", json={"project": bad}, headers=H).status_code == 422
+    assert STATE["calls"] == []
+    host.post("/logout", headers=H)
+    assert login(host, "bob", PW2, ip="10.9.0.8").status_code == 303
+    assert host.get("/api/host/containers").status_code == 403
+    assert host.post("/api/host/containers/update", json={"project": "voice"}, headers=H).status_code == 403
+    assert STATE["calls"] == []
+
+
+def test_a_container_update_waits_for_a_quiet_agent_and_forwards_the_session(host):
+    STATE["runs"] = 1
+    r = host.post("/api/host/containers/update", json={"project": "voice"}, headers=H)
+    assert r.status_code == 409 and STATE["calls"] == []
+    ok = host.post("/api/host/containers/update", json={"project": "voice", "force": True}, headers=H)
+    assert ok.status_code == 200
+    path, body = STATE["calls"][0]
+    assert path == "/containers/update" and body["project"] == "voice" and "__Host-app_session=" in body["cookie"]
+    STATE["calls"].clear()
+    assert host.post("/api/host/containers/rollback", json={"project": "voice"}, headers=H).status_code == 200      # undoing is never blocked
+    assert STATE["calls"][0][0] == "/containers/rollback"
+    assert host.post("/api/host/containers/check", headers=H).status_code == 200
+
+
+def test_home_counts_container_updates(host):
+    import hostctl_backend
+    hostctl_backend._summary.update(t=0.0, n=0)
+    assert hostctl_backend.update_count() == 2

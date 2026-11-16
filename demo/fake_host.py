@@ -39,6 +39,48 @@ def power_timer(action: str, at: float) -> None:
             log(action, "demo: nothing really happened")
 
 
+
+# ---- containers (made-up groups) ---------------------------------------------------------------------------------------------
+def _svc(name, kind, update=False, newer=""):
+    return {"service": name, "ref": name, "kind": kind, "update": update, "newer": newer, "note": ""}
+
+
+C = {"projects": {
+    "voice-out": {"project": "voice-out", "tier": "low", "update": True, "unknown": False, "services": [_svc("tts", "floating", True, "new build")]},
+    "voice-in": {"project": "voice-in", "tier": "low", "update": False, "unknown": False, "services": [_svc("stt", "floating")]},
+    "media": {"project": "media", "tier": "medium", "update": True, "unknown": False, "services": [_svc("player", "pinned", True, "4.11.0")]},
+    "monitoring": {"project": "monitoring", "tier": "medium", "update": False, "unknown": False, "services": [_svc("kuma", "pinned")]},
+    "files": {"project": "files", "tier": "high", "update": True, "unknown": False, "services": [_svc("app", "pinned", True, "35.0.3"), _svc("db", "pinned")]},
+    "web": {"project": "web", "tier": "high", "update": False, "unknown": False, "services": [_svc("proxy", "built")]}},
+    "op": None, "last": None, "points": {}}
+
+
+def finish_container_op(op: str, project: str) -> None:
+    for step in ("saving a restore point", "pulling the new build", "replacing the containers", "waiting for health checks"):
+        with LOCK:
+            C["op"]["step"] = step
+        time.sleep(1.2)
+    with LOCK:
+        p = C["projects"][project]
+        if op == "container_update":
+            for s in p["services"]:
+                s["update"], s["newer"] = False, ""
+            p["update"] = False
+            C["points"][project] = {"id": "demo", "created": time.time(), "services": [s["service"] for s in p["services"]]}
+        else:
+            C["points"].pop(project, None)
+            p["update"] = True
+            p["services"][0].update(update=True, newer="new build")
+        C["last"] = {"op": op, "project": project, "ok": True, "note": "demo: nothing really changed", "finished": time.time(), "dry_run": True}
+        C["op"] = None
+        log(op, "%s (demo)" % project)
+
+
+def containers_state() -> dict:
+    return {"checked_at": time.time() - 1500, "projects": list(C["projects"].values()), "op": C["op"], "last": C["last"], "checking": False,
+            "restore_points": C["points"], "keep_days": 7}
+
+
 class H(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -56,12 +98,16 @@ class H(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.headers.get("X-Hostctl-Key") != KEY:
             return self.reply(403, {"error": "Not allowed."})
+        if self.path.split("?")[0] == "/containers":
+            with LOCK:
+                return self.reply(200, containers_state())
         with LOCK:
             sched = S["sched"]
             if sched and sched["at"] < time.time() - 15:
                 S["sched"] = sched = None
             self.reply(200, {"dry_run": True, "countdown": 8, "packages": {"safe": S["safe"], "care": S["care"]}, "reboot_required": S["reboot"],
                              "update": {"running": bool(S["update"]), "progress": (S["update"] or {}).get("progress"), "last": S["last"]},
+                             "containers": {"updates": sum(1 for p in C["projects"].values() if p["update"]), "checked_at": time.time() - 1500},
                              "scheduled": sched, "backup_running": False, "uptime_seconds": 90000.0, "log": S["log"]})
 
     def do_POST(self):
@@ -75,6 +121,17 @@ class H(BaseHTTPRequestHandler):
                     return self.reply(409, {"error": "Nothing is scheduled."})
                 S["sched"] = None
                 log("cancel", "cancelled the scheduled power action")
+                return self.reply(200, {"ok": True})
+            if self.path in ("/containers/update", "/containers/rollback", "/containers/check"):
+                if self.path == "/containers/check":
+                    return self.reply(200, {"ok": True})
+                project = str(body.get("project") or "")
+                p = C["projects"].get(project)
+                if C["op"] or not p or p["tier"] == "high":
+                    return self.reply(409, {"error": "That cannot be done right now."})
+                op = "container_update" if self.path.endswith("update") else "container_rollback"
+                C["op"] = {"op": op, "project": project, "started": time.time(), "step": "starting"}
+                threading.Thread(target=finish_container_op, args=(op, project), daemon=True).start()
                 return self.reply(200, {"ok": True})
             action = body.get("action")
             if S["update"] or S["sched"]:

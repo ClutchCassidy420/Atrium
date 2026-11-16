@@ -8,6 +8,10 @@ Routes (all owner-only, mounted under /api/host):
   GET  /status   what the helper reports, plus whether the agent is busy; {"enabled": false} when no helper is configured
   POST /action   {"action": "update_safe"|"update_care"|"reboot"|"shutdown", "force": bool}
   POST /cancel   cancel a reboot or shutdown during its countdown
+  GET  /containers                the container groups, newer images, restore points, the running job
+  POST /containers/check          look for newer images now
+  POST /containers/update         {"project": name, "force": bool}   update one group (restore point first, automatic rollback if it fails)
+  POST /containers/rollback       {"project": name}                  put the previous build back
 """
 from __future__ import annotations
 
@@ -26,6 +30,14 @@ CFG = None          # set by configure()
 HERMES = None
 
 TIMEOUT_S = 20.0
+
+
+PROJECT_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,60}$")
+
+
+class Project(BaseModel):
+    project: str
+    force: bool = False
 
 
 class Action(BaseModel):
@@ -119,3 +131,70 @@ async def cancel(request: Request) -> dict:
     if code != 200:
         raise HTTPException(status_code=code if code in (401, 403, 409) else 502, detail=str(data.get("error") or "The host helper refused that."))
     return data
+
+
+# --- containers ---------------------------------------------------------------------------------------------------------------
+
+_summary = {"t": 0.0, "n": 0}
+
+
+def update_count() -> int:
+    """How many container groups have a newer image, for the Home list. Cached for a few minutes; 0 when there is no helper."""
+    import time
+    if not _enabled():
+        return 0
+    if time.time() - _summary["t"] > 300:
+        _summary["t"] = time.time()
+        code, data = _call("GET", "/status")
+        _summary["n"] = int(((data or {}).get("containers") or {}).get("updates") or 0) if code == 200 else 0
+    return _summary["n"]
+
+
+@router.get("/containers")
+async def containers() -> dict:
+    if not _enabled():
+        raise HTTPException(status_code=404, detail="Server actions are not set up on this install.")
+    code, data = await asyncio.to_thread(_call, "GET", "/containers")
+    if code != 200:
+        raise HTTPException(status_code=502, detail="The host helper did not answer.")
+    data["busy"] = await _agent_busy()
+    return data
+
+
+async def _forward(path: str, payload: dict, request: Request) -> dict:
+    payload = {**payload, "cookie": request.headers.get("cookie", "")}
+    code, data = await asyncio.to_thread(_call, "POST", path, payload)
+    if code != 200:
+        raise HTTPException(status_code=code if code in (401, 403, 409) else 502, detail=str(data.get("error") or "The host helper refused that."))
+    return data
+
+
+@router.post("/containers/check")
+async def containers_check(request: Request) -> dict:
+    if not _enabled():
+        raise HTTPException(status_code=404, detail="Server actions are not set up on this install.")
+    _summary["t"] = 0.0
+    return await _forward("/containers/check", {}, request)
+
+
+@router.post("/containers/update")
+async def containers_update(body: Project, request: Request) -> dict:
+    if not _enabled():
+        raise HTTPException(status_code=404, detail="Server actions are not set up on this install.")
+    if not PROJECT_RE.match(body.project):
+        raise HTTPException(status_code=422, detail="Bad group name.")
+    warn = _warnings(await _agent_busy(), {})
+    if warn and not body.force:
+        raise HTTPException(status_code=409, detail="Busy: " + " ".join(warn))
+    _summary["t"] = 0.0
+    return await _forward("/containers/update", {"project": body.project}, request)
+
+
+@router.post("/containers/rollback")
+async def containers_rollback(body: Project, request: Request) -> dict:
+    if not _enabled():
+        raise HTTPException(status_code=404, detail="Server actions are not set up on this install.")
+    if not PROJECT_RE.match(body.project):
+        raise HTTPException(status_code=422, detail="Bad group name.")
+    _summary["t"] = 0.0
+    return await _forward("/containers/rollback", {"project": body.project}, request)

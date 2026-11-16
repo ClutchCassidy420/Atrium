@@ -172,6 +172,14 @@ def build_attention(jobs, board, monitors, system, extra, agent, now: float, inf
         if (sec.get("pending_updates") or 0) > 0:
             add("info", "security", "%d update%s waiting" % (sec["pending_updates"], "" if sec["pending_updates"] == 1 else "s"),
                 "Install them from Settings, Server." if HOST_ACTIONS else "")
+        if HOST_ACTIONS:
+            try:
+                import hostctl_backend
+                n = hostctl_backend.update_count()
+            except Exception:      # noqa: BLE001 - the Home list must never fail because of this
+                n = 0
+            if n:
+                add("info", "containers", "%d container update%s available" % (n, "" if n == 1 else "s"), "Look at them in Settings, Server.")
         if sec.get("cert_days_left") is not None and sec["cert_days_left"] < 21:
             add("warn", "security", "A certificate expires in %d days" % sec["cert_days_left"])
         if (sec.get("failed_ssh_24h") or 0) > 0:

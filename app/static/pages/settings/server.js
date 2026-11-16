@@ -186,5 +186,120 @@
         h("ul", { className: "ats-log" }, data.log.map(function (x, i) { return h("li", { key: i }, h("span", { className: "ats-note" }, ago(x.ts)), " ", h("b", null, x.user || "?"), " · ", x.action, " · ", x.result); }))) : null);
   }
 
-  window.__APP_SUBPAGES__ = Object.assign(window.__APP_SUBPAGES__ || {}, { server: Server });
+  /* ---- containers: newer images, update one group with a restore point, roll back ---------------------------------------- */
+
+  var TIER = { low: "Low risk", medium: "Medium risk", high: "High risk" };
+
+  function describe(p) {
+    var parts = [];
+    (p.services || []).forEach(function (s) {
+      if (s.update) parts.push(s.newer && s.newer !== "new build" ? "version " + s.newer + " is available" : "a new build is available");
+      else if (s.update === null) parts.push("couldn't check right now");
+    });
+    if (parts.length) return parts.filter(function (x, i) { return parts.indexOf(x) === i; }).join(", ");
+    var kinds = (p.services || []).map(function (s) { return s.kind; });
+    if (kinds.every(function (k) { return k === "built"; })) return "built on this server, not updated here";
+    if (kinds.every(function (k) { return k === "digest"; })) return "fixed to one exact build";
+    return "up to date";
+  }
+
+  function Containers() {
+    var d_ = useState(null), data = d_[0], setData = d_[1];
+    var e_ = useState(""), err = e_[0], setErr = e_[1];
+    var c_ = useState(null), confirm = c_[0], setConfirm = c_[1];     // {kind: "update"|"rollback", p: project}
+    var f_ = useState(false), force = f_[0], setForce = f_[1];
+    var b_ = useState(false), busy = b_[0], setBusy = b_[1];
+    var m_ = useState(""), msg = m_[0], setMsg = m_[1];
+
+    function load() {
+      return fetchJSON(API + "/containers").then(function (j) { setData(j); setErr(""); })
+        .catch(function (e) { if (!/404/.test(String(e && e.message))) setErr(errText(e)); setData(function (x) { return x || { off: true }; }); });
+    }
+    useEffect(function () { load(); }, []);
+    var running = !!(data && data.op) || !!(data && data.checking);
+    useEffect(function () {
+      var id = setInterval(load, running ? 3000 : 30000);
+      return function () { clearInterval(id); };
+    }, [running]);
+    useEffect(function () {
+      if (!msg) return undefined;
+      var id = setTimeout(function () { setMsg(""); }, 6000);
+      return function () { clearTimeout(id); };
+    }, [msg]);
+
+    if (!data || data.off) return null;
+    var projects = (data.projects || []).slice().sort(function (a, b) {
+      function rank(p) { return p.update && p.tier !== "high" ? 0 : p.update ? 1 : 2; }       // what you can update now, then what needs doing by hand, then the rest
+      return rank(a) - rank(b) || a.project.localeCompare(b.project);
+    });
+    var updates = projects.filter(function (p) { return p.update; }).length;
+    var warnings = [];
+    if (data.busy && data.busy.runs) warnings.push("The agent is in the middle of a chat run.");
+    if (data.busy && data.busy.cards) warnings.push("A board card is running.");
+
+    function go() {
+      if (warnings.length && confirm.kind === "update" && !force) { setErr("Tick the box to go ahead while those are happening."); return; }
+      setBusy(true);
+      post(API + "/containers/" + confirm.kind, { project: confirm.p.project, force: force }).then(function () {
+        setConfirm(null); setMsg(confirm.kind === "update" ? "Update started." : "Rolling back."); return load();
+      }).catch(function (e) { setErr(errText(e)); }).then(function () { setBusy(false); });
+    }
+    function check() {
+      setBusy(true);
+      post(API + "/containers/check", {}).then(function () { setMsg("Checking for newer images…"); return load(); })
+        .catch(function (e) { setErr(errText(e)); }).then(function () { setBusy(false); });
+    }
+
+    var last = data.last;
+    var lastBanner = last && Date.now() / 1000 - last.finished < 6 * 3600 ? h("div", { className: "ats-confirm" + (last.ok ? "" : " ats-confirm-danger") },
+      h("div", { className: "ats-h" }, (last.op === "container_rollback" ? "Rollback of " : "Update of ") + last.project + (last.ok ? " finished" : " did not succeed")),
+      h("div", { className: "ats-note" }, last.note + (last.auto_rolled_back ? ". The previous build is running again." : "") + (last.dry_run ? " (test run)" : ""))) : null;
+    var opBanner = data.op ? h("div", { className: "ats-confirm" }, h("div", { className: "ats-h" }, (data.op.op === "container_rollback" ? "Rolling back " : "Updating ") + data.op.project),
+      h("div", { className: "ats-note" }, data.op.step + ". It runs on the server, so you can leave this page.")) : null;
+
+    var panel = null;
+    if (confirm && !data.op) {
+      var p = confirm.p, up = confirm.kind === "update";
+      var pt = (data.restore_points || {})[p.project];
+      panel = h("div", { className: "ats-confirm" },
+        h("div", { className: "ats-h" }, (up ? "Update " : "Roll back ") + p.project),
+        up ? h("div", { className: "ats-note" }, "The whole group is updated together: " + (p.services || []).filter(function (s) { return s.update; }).map(function (s) { return s.service + (s.newer && s.newer !== "new build" ? " to " + s.newer : ""); }).join(", ") + ".")
+           : h("div", { className: "ats-note" }, "Puts back the build you had before the last update and recreates the containers. Your data stays as it is now: if the newer version changed its data files, the program rolls back but the data does not."),
+        up ? h("ul", { className: "ats-checks" },
+          h("li", { className: "ats-okline" }, "✓ The current build is kept as a restore point for " + data.keep_days + " days"),
+          h("li", { className: "ats-okline" }, "✓ If the new build is not healthy, it rolls back by itself"),
+          warnings.map(function (w) { return h("li", { key: w, className: "ats-warn" }, "⚠ " + w); })) : null,
+        up && warnings.length ? h("label", { className: "ats-inline" }, h("input", { type: "checkbox", checked: force, onChange: function (ev) { setForce(ev.target.checked); } }), "Go ahead anyway") : null,
+        h("div", { className: "ats-actions" },
+          h("button", { type: "button", className: "ats-btn ats-btn-primary", disabled: busy, onClick: go }, up ? "Update now" : "Roll back"),
+          h("button", { type: "button", className: "ats-btn", disabled: busy, onClick: function () { setConfirm(null); setErr(""); } }, "Cancel")));
+    }
+
+    return h("div", { className: "ats-server" },
+      opBanner, lastBanner,
+      msg ? h("div", { className: "ats-msg" }, msg) : null,
+      err ? h("div", { className: "ats-err" }, err) : null,
+      h("div", { className: "ats-card" },
+        h("div", { className: "ats-row" }, h("div", { className: "ats-h" }, "Containers"),
+          h("span", { className: "ats-paused" }, updates ? updates + " update" + (updates === 1 ? "" : "s") + " available" : "all current")),
+        h("div", { className: "ats-note" }, "Each group updates together. Before an update the current build is saved, so a rollback is one click for " + data.keep_days + " days. " +
+          (data.checked_at ? "Checked " + ago(data.checked_at) + "." : "Not checked yet.")),
+        h("div", { className: "ats-actions" }, h("button", { type: "button", className: "ats-btn", disabled: busy || running, onClick: check }, data.checking ? "Checking…" : "Check now")),
+        h("div", { className: "ats-ctable" }, projects.map(function (p) {
+          var pt = (data.restore_points || {})[p.project];
+          var can = (p.tier === "low" || p.tier === "medium") && p.update && !data.op;
+          return h("div", { key: p.project, className: "ats-crow" },
+            h("div", { className: "ats-cmain" }, h("div", { className: "ats-row-t" }, p.project, h("span", { className: "ats-tier ats-tier-" + p.tier }, TIER[p.tier] || p.tier)),
+              h("div", { className: "ats-note" }, describe(p) + (p.tier === "high" && p.update ? ". Update this one by hand." : ""))),
+            h("div", { className: "ats-actions" },
+              can ? h("button", { type: "button", className: "ats-btn ats-btn-primary", disabled: !!data.op, onClick: function () { setConfirm({ kind: "update", p: p }); setForce(false); setErr(""); } }, "Update") : null,
+              pt && p.tier !== "high" ? h("button", { type: "button", className: "ats-btn", disabled: !!data.op, title: "Saved " + ago(pt.created), onClick: function () { setConfirm({ kind: "rollback", p: p }); setErr(""); } }, "Roll back") : null));
+        }))),
+      panel);
+  }
+
+  function ServerPage() { return h("div", { className: "ats-server" }, h(Server, null), h(Containers, null)); }
+
+  window.__APP_SUBPAGES__ = Object.assign(window.__APP_SUBPAGES__ || {}, { server: ServerPage });
 })();
+

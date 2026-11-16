@@ -139,4 +139,9 @@ capabilities, and no published ports (a reverse proxy reaches it). Keep `INSTANC
 - Updates run as their own systemd job, so they survive the app being restarted by the update; the page reports the result and whether a
   restart is still needed. Every action is logged with who and when.
 - Routes: `GET /api/host/status`, `POST /api/host/action` (`update_safe`, `update_care`, `reboot`, `shutdown`), `POST /api/host/cancel`.
-- Home lists "N updates waiting" and points at this section when it is set up. A shutdown leaves the machine off until someone presses its power button.
+- **Containers.** The same section lists the install's Docker Compose groups, whether a newer image exists for each (a new build of a floating tag, or a
+  newer version within the same major version of a pinned one), and lets an owner update one group at a time. The helper saves a restore point first,
+  pulls and recreates only that group, waits for it to be healthy, and rolls back by itself if it is not. **Roll back** puts the previous build back
+  for as long as the restore point is kept. Only groups listed in `HOSTCTL_TIER_LOW` and `HOSTCTL_TIER_MEDIUM` can be updated here; the rest are high
+  risk and only reported. Routes: `GET /api/host/containers`, `POST /api/host/containers/check|update|rollback`. See `host/README.md`.
+- Home lists "N updates waiting" and "N container updates available" and points at this section when it is set up. A shutdown leaves the machine off until someone presses its power button.
