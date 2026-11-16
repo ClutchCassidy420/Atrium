@@ -36,8 +36,9 @@ registries whether something newer exists:
   version** (never the next major version, which can change data in ways a rollback cannot undo; for 0.x versions it stays inside the minor version).
 - Images fixed by digest and images built on the server are reported as such and never touched.
 
-Groups are sorted into **tiers** by name: `HOSTCTL_TIER_LOW` and `HOSTCTL_TIER_MEDIUM` list the groups the page may update. Everything else is
-**high risk** and is only reported, never updated by the helper.
+Every group can be updated from the page. Groups carry a **risk label** by name: `HOSTCTL_TIER_LOW` and `HOSTCTL_TIER_MEDIUM` list the low and
+medium ones, everything else is labelled **high risk**. The label only changes the confirmation: a high-risk update shows a warning that it could stop
+working properly and that a rollback restores the program, not its data.
 
 An update works on one group at a time:
 1. It keeps the current image under its own tag (`atrium-restore/...`) and copies the compose file (a restore point, kept `HOSTCTL_KEEP_DAYS` days).

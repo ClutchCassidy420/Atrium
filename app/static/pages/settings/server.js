@@ -67,6 +67,7 @@
       live ? h("div", { className: "sv-x" }, h("div", { className: "sv-step" }, live), h("div", { className: "sv-bar" }, h("i", null))) : null,
       open && !live ? h("div", { className: "sv-x" },
         h("div", null, open.text),
+        open.warn ? h("div", { className: "sv-warn" }, open.warn) : null,
         open.lines && open.lines.length ? h("ul", { className: "sv-lines" }, open.lines.map(function (l) { return h("li", { key: l }, l); })) : null,
         h("div", { className: "sv-btns" },
           h("button", { type: "button", className: "ats-btn" + (open.danger ? " ats-btn-danger" : " ats-btn-primary"), disabled: p.busy, onClick: p.onGo }, open.go),
@@ -129,10 +130,11 @@
     if (pk.care.length) rows.push({ key: "sys:care", name: "Docker, GPU tools and the network tunnel", sub: plural(pk.care.length, "package") + " · can briefly drop containers and remote access", type: "System", risk: "care", button: "Update", primary: false, kind: "action", action: "update_care", text: "Services restart for a moment and remote access can drop. The update runs as its own job on the server, so this page can reconnect and show the result.", go: "Update now", rank: 1 });
     ((cd && cd.projects) || []).forEach(function (p) {
       if (!p.update) return;
-      var can = p.tier === "low" || p.tier === "medium";
       var names = (p.services || []).filter(function (s) { return s.update; }).map(function (s) { return s.service; });
-      rows.push({ key: "ct:" + p.project, name: p.project, sub: describe(p), type: "Container", risk: p.tier, button: can ? "Update" : "", note: can ? "" : "Update by hand", primary: false, kind: "container", project: p.project,
-        text: "The group is updated together (" + names.join(", ") + "). The current build is kept for " + cd.keep_days + " days, and if the new one is not healthy it rolls back by itself.", go: "Update now", rank: can ? 2 : 3 });
+      rows.push({ key: "ct:" + p.project, name: p.project, sub: describe(p), type: "Container", risk: p.tier, button: "Update", primary: false, kind: "container", project: p.project,
+        text: "The group is updated together (" + names.join(", ") + "). The current build is kept for " + cd.keep_days + " days, and if the new one is not healthy it rolls back by itself.",
+        warn: p.tier === "high" ? "High risk: this update could stop working properly, for example if the new version changes its data files. Your current build is saved and Roll back puts it back, but a rollback restores the program, not its data. If the data matters, back it up first." : "",
+        go: "Update now", rank: p.tier === "low" ? 2 : p.tier === "medium" ? 3 : 4 });
     });
     rows.sort(function (a, b) { return a.rank - b.rank; });
 
@@ -146,7 +148,7 @@
     var recent = [];
     if (cd) Object.keys(cd.restore_points || {}).forEach(function (proj) {
       var p = (cd.projects || []).filter(function (x) { return x.project === proj; })[0];
-      if (p && p.tier !== "high") recent.push({ key: "rb:" + proj, project: proj, created: cd.restore_points[proj].created });
+      if (p) recent.push({ key: "rb:" + proj, project: proj, created: cd.restore_points[proj].created });
     });
     recent.sort(function (a, b) { return b.created - a.created; });
 
@@ -155,7 +157,7 @@
       if (openKey !== key) return null;
       var row = rows.filter(function (r) { return r.key === key; })[0];
       var notes = warnings.map(function (w) { return "⚠ " + w; });
-      if (row) return { text: row.text, go: row.go, lines: notes, danger: false };
+      if (row) return { text: row.text, warn: row.warn, go: row.go, lines: notes, danger: false };
       if (key.indexOf("rb:") === 0) return { text: "Puts back the build you had before the last update and recreates the containers. Your data stays as it is now: if the newer version changed its data files, the program rolls back but the data does not.", go: "Roll back", lines: [], danger: false };
       if (key === "power:reboot") return { text: "Everything stops and then starts again by itself, usually within three minutes. You get " + (data.countdown || 30) + " seconds to cancel.", go: "Reboot", lines: notes, danger: false };
       if (key === "power:shutdown") return { text: "Everything stops and the server stays off until someone presses its power button. You cannot start it again from this app. You get " + (data.countdown || 30) + " seconds to cancel.", go: "Shut down", lines: notes, danger: true };

@@ -127,7 +127,7 @@ class H(BaseHTTPRequestHandler):
                     return self.reply(200, {"ok": True})
                 project = str(body.get("project") or "")
                 p = C["projects"].get(project)
-                if C["op"] or not p or p["tier"] == "high":
+                if C["op"] or not p:
                     return self.reply(409, {"error": "That cannot be done right now."})
                 op = "container_update" if self.path.endswith("update") else "container_rollback"
                 C["op"] = {"op": op, "project": project, "started": time.time(), "step": "starting"}

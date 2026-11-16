@@ -253,7 +253,8 @@ CHECK_LOCK = threading.Lock()
 
 
 def tier_of(project: str) -> str:
-    return "low" if project in TIER_LOW else "medium" if project in TIER_MEDIUM else "high"      # anything not listed is treated as high risk
+    """The risk label shown next to a group. Every group can be updated from the page; the label decides how strong the warning is."""
+    return "low" if project in TIER_LOW else "medium" if project in TIER_MEDIUM else "high"      # anything not listed is labelled high risk
 
 
 def split_ref(ref: str) -> tuple[str, str, str]:
@@ -560,8 +561,6 @@ def start_container_op(op: str, project: str, user: str) -> tuple[int, dict]:
         return 409, {"error": "Another update is already running."}
     if power_state():
         return 409, {"error": "A reboot or shutdown is scheduled. Cancel it first."}
-    if tier_of(project) == "high":
-        return 403, {"error": "That group is high risk and is updated by hand."}
     if op == "container_update":
         info = next((p for p in container_state()["projects"] if p["project"] == project), None)
         if not info or not info.get("update"):
@@ -674,7 +673,7 @@ def run_container(op: str, project: str) -> int:
 
     # update
     todo = [x for x in cached.get("services", []) if x.get("update")]
-    if not todo or tier_of(project) == "high":
+    if not todo:
         return finish(False, "nothing to update here")
     pid = time.strftime("%Y%m%d-%H%M%S", time.gmtime())
     pdir = restore_dir() / pid

@@ -185,7 +185,8 @@ def _ready(hc, monkeypatch, tmp_path, project="voice", tier="low", update=True):
 def test_container_jobs_are_refused_when_they_should_be(hc, monkeypatch, tmp_path):
     _ready(hc, monkeypatch, tmp_path)
     assert hc.start_container_op("container_update", "../etc", "u")[0] == 400
-    assert hc.start_container_op("container_update", "mail", "u")[0] == 403                # not listed, so high risk
+    _ready(hc, monkeypatch, tmp_path, tier="high")
+    assert hc.start_container_op("container_update", "voice", "u")[0] == 200               # high risk is only a label: the update still runs
     _ready(hc, monkeypatch, tmp_path, update=False)
     assert hc.start_container_op("container_update", "voice", "u")[0] == 409               # nothing newer
     assert hc.start_container_op("container_rollback", "voice", "u")[0] == 409             # no restore point
