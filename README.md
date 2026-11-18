@@ -66,5 +66,8 @@ Early and used daily by its author, on one setup. Expect rough edges. Issues and
 
 ## About
 
-Atrium was created by Clutch Cassidy / RezWorks Studios and is released under the [MIT License](LICENSE). It is independent of, and not
+Atrium was created by Clutch Cassidy / RezWorks Studios and is released under the [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0).
+In plain words: use it, change it and share it; if you run a modified version as a service for other people, you must share your changes under
+the same license. Releases up to and including 1.0.0 were published under the MIT License and stay available under it; see the
+[changelog](CHANGELOG.md). Copyright (C) 2026 Clutch Cassidy / RezWorks Studios. Atrium is independent of, and not
 affiliated with or endorsed by, Nous Research. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for what it is built with.
