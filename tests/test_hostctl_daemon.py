@@ -282,7 +282,7 @@ def test_updating_a_digest_pinned_group_moves_the_pin_and_a_rollback_moves_it_ba
     compose = tmp_path / "compose.yaml"
     compose.write_text("services:\n  llama:\n    image: ghcr.io/x/llama@sha256:old\n")
     group = {"project": "llama", "dir": str(tmp_path), "files": [str(compose)],
-             "services": {"llama": {"service": "llama", "containers": ["vera-llama"], "image_id": "sha256:oldimg", "ref": "ghcr.io/x/llama@sha256:old", "kind": "digest", "built": False, "track": "ghcr.io/x/llama:server-cuda13"}}}
+             "services": {"llama": {"service": "llama", "containers": ["example-llama"], "image_id": "sha256:oldimg", "ref": "ghcr.io/x/llama@sha256:old", "kind": "digest", "built": False, "track": "ghcr.io/x/llama:server-cuda13"}}}
     monkeypatch.setattr(hc, "discover", lambda: {"llama": group})
     monkeypatch.setattr(hc, "TIER_LOW", {"llama"})
     monkeypatch.setattr(hc, "DRY", False)
