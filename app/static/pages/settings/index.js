@@ -179,22 +179,69 @@
 
   function fmtK(n) { return n >= 1000 ? (n / 1000).toFixed(1) + "K" : String(n || 0); }
 
+  function ModelPicker() {
+    var route = "/api/plugins/atrium-mission/models";
+    var d = useState(null), data = d[0], setData = d[1];
+    var p = useState(""), pick = p[0], setPick = p[1];
+    var m = useState(""), message = m[0], setMessage = m[1];
+    var b = useState(false), busy = b[0], setBusy = b[1];
+    function refresh() {
+      return fetchJSON(route).then(function (result) {
+        setData(result);
+        var selection = result.selected || {};
+        setPick(selection.engine === "catalog" && !selection.default
+          ? JSON.stringify([selection.provider, selection.model]) : "");
+      }).catch(function (e) { setMessage(errText(e)); });
+    }
+    useEffect(function () { refresh(); }, []);
+    var groups = new Map();
+    (data && data.models || []).forEach(function (row) {
+      if (!groups.has(row.provider)) groups.set(row.provider, { label: row.label, models: [] });
+      groups.get(row.provider).models.push(row.model);
+    });
+    function apply() {
+      var selected = pick ? JSON.parse(pick) : ["", ""];
+      if (pick && !window.confirm("Use " + selected[1] + " for interactive chats? Chat context may be sent to this provider.")) return;
+      setBusy(true);
+      setMessage("");
+      post(route, { provider: selected[0], model: selected[1], confirm: Boolean(pick) })
+        .then(function () { setMessage("Model updated."); return refresh(); })
+        .catch(function (e) { setMessage(errText(e)); })
+        .finally(function () { setBusy(false); });
+    }
+    return h("div", { className: "ats-card" },
+      h("div", { className: "ats-h" }, "Models & providers"),
+      h("div", { className: "ats-note" }, "Applies to Chat and the Home Ask box for this install."),
+      data ? h("div", { className: "ats-row ats-wrap" },
+        h("select", { className: "ats-btn", value: pick, "aria-label": "Interactive chat model",
+          disabled: busy || !data.available, onChange: function (e) { setPick(e.target.value); } },
+          h("option", { value: "" }, "Hermes default" + (data.default_model ? " · " + data.default_model : "")),
+          Array.from(groups, function (entry) {
+            return h("optgroup", { key: entry[0], label: entry[1].label },
+              entry[1].models.map(function (model) {
+                var value = JSON.stringify([entry[0], model]);
+                return h("option", { key: value, value: value }, model);
+              }));
+          })),
+        h("button", { className: "ats-btn", type: "button", disabled: busy || !data.available, onClick: apply }, "Use model"),
+        h("button", { className: "ats-btn", type: "button", disabled: busy, onClick: refresh }, "Refresh models")) : null,
+      h("div", { className: "ats-note", role: "status" }, message || (!data ? "Loading models…" :
+        !data.available ? "Model discovery is unavailable on this Hermes connection." : "")),
+      data && data.provider_settings_url
+        ? h("a", { className: "ats-btn", href: data.provider_settings_url, target: "_blank", rel: "noopener noreferrer" }, "Manage providers in Hermes")
+        : h("p", { className: "ats-note" }, "Connect providers in the Hermes dashboard or run hermes model, then refresh this list."));
+  }
+
   function Cloud() {
-    var e_ = useState(null), eng = e_[0], setEng = e_[1];
-    var r_ = useState(null), room = r_[0], setRoom = r_[1];
+    var r = useState(null), room = r[0], setRoom = r[1];
     useEffect(function () {
-      fetchJSON("/api/plugins/atrium-mission/engine").then(setEng).catch(function () { /* optional */ });
       fetchJSON("/api/plugins/atrium-room/models").then(setRoom).catch(function () { /* optional */ });
     }, []);
-    var cloud = eng && eng.engine === "claude";
+    if (!room || !room.today) return null;
     return h("div", { className: "ats-card" },
-      h("div", { className: "ats-h" }, "Cloud use"),
-      h("div", { className: "ats-row" }, h("div", { className: "ats-row-text" }, h("div", { className: "ats-row-t" }, "Engine for chats from the app"),
-        h("div", { className: "ats-note" }, !eng ? "Loading…" : cloud ? "Claude in the cloud (" + (eng.seconds_left == null ? "until switched back" : Math.max(1, Math.round(eng.seconds_left / 60)) + " min left") + ")" : "Local: your own GPUs. Nothing leaves the server.")),
-        h("button", { type: "button", className: "ats-btn", onClick: function () { window.location.hash = "persona"; } }, "Change in Persona")),
-      room && room.today ? h("div", { className: "ats-row" }, h("div", { className: "ats-row-text" }, h("div", { className: "ats-row-t" }, "Claude in the Room today"),
-        h("div", { className: "ats-note" }, room.today.calls + " of " + room.daily_limit + " replies · " + fmtK(room.today.in) + " tokens in, " + fmtK(room.today.out) + " out"))) : null,
-      h("div", { className: "ats-note" }, "Costs are billed by Anthropic; see your Anthropic console for the real numbers."));
+      h("div", { className: "ats-h" }, "Claude in the Room today"),
+      h("div", { className: "ats-note" }, room.today.calls + " of " + room.daily_limit + " replies · " +
+        fmtK(room.today.in) + " tokens in, " + fmtK(room.today.out) + " out"));
   }
 
   /* ---------- voice ---------- */
@@ -284,7 +331,7 @@
     { id: "persona", label: "Persona", icon: "🎭", note: "Who the agent is and the rules she works by, with every earlier version kept.", parts: [embed("persona", "The persona editor did not load.")] },
     { id: "avatar", label: "Avatar", icon: "🎨", note: "Pick and customise how the agent looks.", parts: [embed("avatar", "The avatar editor did not load.")] },
     { id: "memory", label: "Memory", icon: "🧠", note: "The agent's notes as a graph: every note a dot, every link a line. Read only.", parts: [embed("memory", "The memory view did not load.")] },
-    { id: "engine", label: "Cloud use", icon: "☁️", note: "Which engine answers chats from the app, and what the cloud has used.", parts: [Cloud] },
+    { id: "engine", label: "Models & providers", icon: "☁️", note: "Choose which model answers interactive chats.", parts: [ModelPicker, Cloud] },
     { id: "server", label: "Server", icon: "🖥️", note: "Install updates, reboot or shut down the machine this runs on. Owners only.", parts: [embed("server", "The server actions did not load.")], hostOnly: true }
   ];
 

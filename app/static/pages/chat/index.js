@@ -837,9 +837,9 @@
       var iv = setInterval(load, 30000);
       return function () { clearInterval(iv); };
     }, []);
-    if (!eng || eng.engine !== "claude") return null;
+    if (!eng || (eng.engine !== "claude" && eng.engine !== "catalog")) return null;
     var left = eng.seconds_left == null ? "until switched back" : eng.seconds_left >= 3600 ? Math.floor(eng.seconds_left / 3600) + " h " + Math.round((eng.seconds_left % 3600) / 60) + " min left" : Math.max(1, Math.round(eng.seconds_left / 60)) + " min left";
-    return h("span", { className: "atc-engine", title: "Answers are coming from Claude in the cloud. Change it on Mission Control." }, "☁ " + eng.label + " · " + left);
+    return h("span", { className: "atc-engine", title: "Change the model in Settings." }, eng.engine === "catalog" ? eng.label : "☁ " + eng.label + " · " + left);
   }
 
   function ActionsButton() {
@@ -1647,7 +1647,7 @@
               h("span", { className: "atc-doc-name" }, "📄 " + d.name),
               h("span", { className: "atc-doc-meta" }, d.status === "uploading" ? "Uploading… " + sizeLabel(d.size) : (d.info.kind + " · " + sizeLabel(d.info.size) + (d.info.pages ? " · " + d.info.pages + " pages" : ""))),
               d.info ? h("button", { type: "button", className: "atc-doc-keep" + (d.keep ? " atc-doc-keep-on" : ""), title: d.keep ? "Kept for filing. Click to make it chat-only again." : "Only in this chat, removed after 30 days. Click to keep and file it.", onClick: function () { toggleKeep(d); } }, d.keep ? "Keep and file" : "Just for this chat") : null,
-              d.info && d.info.cloud ? h("span", { className: "atc-doc-warn" }, "{{agent}} is on the Claude cloud engine, so what she reads of this goes to Anthropic.") : null,
+              d.info && d.info.cloud ? h("span", { className: "atc-doc-warn" }, "{{agent}} may send the contents she reads to the selected model provider.") : null,
               d.info && d.info.scanned ? h("span", { className: "atc-doc-warn" }, "No text found. It may be a scan.") : null,
               h("button", { type: "button", className: "atc-chipx", "aria-label": "Remove " + d.name, onClick: function () { removeDoc(d); } }, "×"));
           })) : null,

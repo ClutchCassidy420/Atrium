@@ -3,6 +3,12 @@
 Atrium is a small web app that gives people a private front end for an AI agent. It is the same for everyone. What makes one
 install different from another lives in a separate **instance** folder, never in this code.
 
+## Models and providers
+
+Owners can choose a model under **Settings → Models & providers**. Atrium lists connected providers from the Hermes dashboard and applies the selection to Chat and Home Ask. Scheduled jobs keep their Hermes configuration.
+
+Connect local endpoints and cloud providers in Hermes or with `hermes model`. Set `HERMES_PROVIDER_SETTINGS_URL` to the browser-accessible Hermes settings page to show a direct link. If your dashboard cannot provide a model catalog, the existing Hermes default and legacy engine controls remain available.
+
 ## The two layers
 
 | Layer | What it holds | Where |

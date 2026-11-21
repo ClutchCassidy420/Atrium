@@ -490,7 +490,7 @@ async def doc_upload(request: Request, name: str, keep: int = 0) -> dict:
         "name": clean, "path": str(target), "size": size, "kept": bool(keep),
         "kind": info.get("kind"), "pages": info.get("pages"), "extra": info.get("extra"),
         "preview": info.get("preview", ""), "scanned": bool(info.get("scanned")),
-        "cloud": st.get("engine") == "claude",
+        "cloud": st.get("engine") == "claude" or (st.get("engine") == "catalog" and not st.get("default")),
     }
 
 
@@ -1316,32 +1316,14 @@ async def undo_action(entry_id: str, request: Request) -> dict:
 # --- engine (read side): which model answers chats started here -------------------------------------------------
 # The switch itself lives in the Mission Control plugin; both read <HERMES_HOME>/atrium/engine.json.
 
-_CLAUDE_IDS = {"claude-sonnet-5-5": "Claude Sonnet 5.5", "claude-opus-5-5": "Claude Opus 5.5", "claude-haiku-5-5": "Claude Haiku 5.5", "claude-fable-5-2": "Claude Fable 5.2"}
-
-
-def _engine_now() -> dict:
-    try:
-        data = json.loads((_hermes_home() / "atrium" / "engine.json").read_text(encoding="utf-8"))
-        if isinstance(data, dict) and data.get("engine") == "claude" and data.get("model") in _CLAUDE_IDS:
-            until = data.get("until")
-            if until and time.time() > float(until):
-                return {"engine": "local"}
-            return {"engine": "claude", "model": data["model"], "until": until}
-    except (OSError, ValueError):
-        pass
-    return {"engine": "local"}
-
-
-def _engine_override() -> dict:
-    st = _engine_now()
-    return {"model": st["model"], "provider": "anthropic"} if st["engine"] == "claude" else {}
+from mission_backend import CLAUDE_MODELS, engine_override as _engine_override, engine_state as _engine_now
 
 
 @router.get("/engine")
 async def engine_info() -> dict:
     st = await asyncio.to_thread(_engine_now)
     left = max(0, int(float(st["until"]) - time.time())) if st["engine"] == "claude" and st.get("until") else None
-    return {"engine": st["engine"], "label": _CLAUDE_IDS.get(st.get("model", ""), ""), "seconds_left": left}
+    return {"engine": st["engine"], "label": CLAUDE_MODELS.get(st.get("model", ""), st.get("model", "")), "seconds_left": left}
 
 
 # --- settings routes: notification preferences and the devices that receive them ----------------------------------

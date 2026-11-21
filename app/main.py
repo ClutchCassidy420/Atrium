@@ -331,9 +331,12 @@ def make_app(cfg: configmod.Config | None = None, hermes: Hermes | None = None, 
             status, run = await hermes.api_call("GET", "/v1/runs/" + prev["id"])
             if status == 200 and run and run.get("status") not in TERMINAL:
                 return JSONResponse({"detail": "%s is still working on your last question." % cfg.agent_name}, status_code=409)
-        status, run = await hermes.api_call("POST", "/v1/runs", {"input": message, "session_id": "ask-" + who["user"]})
+        from mission_backend import engine_override
+
+        payload = {"input": message, "session_id": "ask-" + who["user"], **engine_override()}
+        status, run = await hermes.api_call("POST", "/v1/runs", payload)
         rid = run.get("run_id") if isinstance(run, dict) else None
-        if status not in (200, 201) or not isinstance(rid, str) or not RUN_ID.match(rid):
+        if status not in (200, 201, 202) or not isinstance(rid, str) or not RUN_ID.match(rid):
             return JSONResponse({"detail": "Could not reach %s right now." % cfg.agent_name}, status_code=502)
         last_run[who["user"]] = {"id": rid, "at": time.monotonic()}
         owner_of[rid] = who["user"]

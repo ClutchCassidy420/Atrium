@@ -37,6 +37,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import tempfile
 import datetime
 import http.client
 import re
@@ -614,6 +615,9 @@ def engine_state() -> dict:
     st: dict = {"engine": "local"}
     try:
         data = json.loads(_engine_path().read_text(encoding="utf-8"))
+        if isinstance(data, dict) and data.get("engine") == "catalog":
+            if all(isinstance(data.get(key), str) and data[key] for key in ("model", "provider")):
+                return {key: data[key] for key in ("engine", "model", "provider", "default") if key in data}
         if isinstance(data, dict) and data.get("engine") == "claude" and data.get("model") in CLAUDE_MODELS:
             st = {"engine": "claude", "model": data["model"], "until": data.get("until"), "since": data.get("since")}
     except (OSError, ValueError):
@@ -627,14 +631,20 @@ def engine_state() -> dict:
 def _write_engine(st: dict) -> None:
     path = _engine_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(st), encoding="utf-8")
-    os.replace(tmp, path)
+    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent, delete=False) as tmp:
+        try:
+            json.dump(st, tmp)
+            tmp.flush()
+            os.replace(tmp.name, path)
+        finally:
+            Path(tmp.name).unlink(missing_ok=True)
 
 
 def engine_override() -> dict:
     """Extra fields for a /v1/runs request when a cloud engine is on."""
     st = engine_state()
+    if st["engine"] == "catalog":
+        return {"model": st["model"], "provider": st["provider"], "require_model_lock": True}
     return {"model": st["model"], "provider": "anthropic"} if st["engine"] == "claude" else {}
 
 
@@ -659,7 +669,11 @@ async def engine_get() -> dict:
 @router.post("/engine")
 async def engine_set(body: EngineBody) -> dict:
     if body.engine == "local":
-        await asyncio.to_thread(_write_engine, {"engine": "local"})
+        current = await asyncio.to_thread(engine_state)
+        selected = _catalog_default(await _model_catalog()) if current["engine"] == "catalog" else {"engine": "local"}
+        if not selected:
+            raise HTTPException(503, "Could not resolve the Hermes default model.")
+        await asyncio.to_thread(_write_engine, selected)
         return {"ok": True}
     if not body.confirm:
         raise HTTPException(status_code=400, detail="Confirm the switch to the cloud engine first.")
@@ -671,6 +685,84 @@ async def engine_set(body: EngineBody) -> dict:
     st = {"engine": "claude", "model": body.model, "since": now, "until": (now + body.minutes * 60) if body.minutes else None}
     await asyncio.to_thread(_write_engine, st)
     return {"ok": True}
+
+
+async def _model_catalog() -> dict:
+    if HERMES is None or not HERMES.dash_base:
+        return {}
+    code, data = await HERMES.dash_call("GET", "/api/model/options", timeout=25)
+    return data if code == 200 and isinstance(data, dict) else {}
+
+
+def _catalog_routes(catalog: dict) -> list[dict]:
+    routes = []
+    for provider in catalog.get("providers") or []:
+        if not isinstance(provider, dict) or provider.get("authenticated") is not True:
+            continue
+        slug = provider.get("slug")
+        if not isinstance(slug, str) or not re.fullmatch(r"[a-zA-Z0-9_.:-]{1,80}", slug):
+            continue
+        for model in provider.get("models") or []:
+            if isinstance(model, str) and 0 < len(model) <= 240 and not re.search(r"[\x00\r\n]", model):
+                routes.append({"provider": slug, "model": model, "label": provider.get("name") or slug})
+    return routes
+
+
+def _catalog_default(catalog: dict) -> dict:
+    provider, model = catalog.get("provider"), catalog.get("model")
+    if isinstance(provider, str) and provider and isinstance(model, str) and model:
+        return {"engine": "catalog", "provider": provider, "model": model, "default": True}
+    return {}
+
+
+def _provider_settings_url() -> str:
+    from urllib.parse import urlsplit
+
+    try:
+        value = os.environ.get("HERMES_PROVIDER_SETTINGS_URL", "").strip()
+        parsed = urlsplit(value)
+        if parsed.hostname and not parsed.username and not parsed.password and (
+            parsed.scheme == "https" or
+            (parsed.scheme == "http" and parsed.hostname in ("localhost", "127.0.0.1", "::1"))
+        ):
+            return value
+    except ValueError:
+        pass
+    return ""
+
+
+class CatalogModel(BaseModel):
+    provider: str = Field(default="", max_length=80)
+    model: str = Field(default="", max_length=240)
+    confirm: bool = False
+
+
+@router.get("/models")
+async def model_options() -> dict:
+    catalog = await _model_catalog()
+    return {"available": bool(catalog), "models": _catalog_routes(catalog),
+            "selected": await asyncio.to_thread(engine_state),
+            "default_model": _catalog_default(catalog).get("model"),
+            "provider_settings_url": _provider_settings_url()}
+
+
+@router.post("/models")
+async def model_select(body: CatalogModel) -> dict:
+    catalog = await _model_catalog()
+    default = _catalog_default(catalog)
+    if not default:
+        raise HTTPException(503, "Could not resolve the Hermes default model.")
+    if not body.provider and not body.model:
+        selected = default
+    else:
+        if not body.confirm:
+            raise HTTPException(400, "Confirm changing the model for interactive chats.")
+        if not any(r["provider"] == body.provider and r["model"] == body.model
+                   for r in _catalog_routes(catalog)):
+            raise HTTPException(409, "Choose a model from a connected Hermes provider.")
+        selected = {"engine": "catalog", "provider": body.provider, "model": body.model}
+    await asyncio.to_thread(_write_engine, selected)
+    return {"selected": selected}
 
 
 # --- soul: The agent's identity and rules (SOUL.md) ------------------------------------------------------------------

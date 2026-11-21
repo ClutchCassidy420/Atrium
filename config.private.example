@@ -6,6 +6,7 @@ APP_HOSTNAME=
 # Hermes
 HERMES_API_BASE=            # the agent API server (runs, events, stop, approval)
 HERMES_API_KEY=             # held server-side only
+HERMES_PROVIDER_SETTINGS_URL=  # optional browser-accessible Hermes provider settings page
 HERMES_DASHBOARD_BASE=      # the dashboard server, for /api/status, /api/sessions and similar
 HERMES_DASHBOARD_TOKEN=     # only if the fixed-token option is chosen (see docs/STAGE0-FINDINGS.md, section 4)
 HERMES_DATA_DIR=            # the Hermes data folder, mounted into the app
