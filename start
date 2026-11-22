@@ -24,7 +24,7 @@ UV_PROJECT_ENVIRONMENT="$state/runtime-env" uv sync --project "$root" --python 3
 if [[ ! -x $ATRIUM_WEB_PYTHON ]]; then
     uv venv --python 3.14 "$state/web-env"
 fi
-uv pip install --python "$ATRIUM_WEB_PYTHON" -r "$root/atrium/requirements.txt"
+uv pip sync --require-hashes --python "$ATRIUM_WEB_PYTHON" "$root/atrium/requirements-source.lock"
 mkdir -p "$state/web-data"
 if [[ ! -f "$state/web-data/users.json" ]]; then
     "$ATRIUM_WEB_PYTHON" "$root/atrium/scripts/manage_users.py" "$state/web-data" add owner owner
