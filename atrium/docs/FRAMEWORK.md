@@ -66,6 +66,12 @@ Restore points in the sidecar get unique names, and a rewind is checked against 
 
 The agent's shared browser has no open debugging port. The sidecar publishes `GET /json/version` and the `/devtools/browser/<id>` WebSocket on its private port 9000, and both require the `X-CDP-Token` header to equal the sidecar's `CDP_TOKEN`; with `CDP_TOKEN` unset the entry point is closed. The agent's CDP client must be able to send that header. Check this before upgrading an install whose agent connected to the old port 9222.
 
+### Your own chat model
+
+An owner can choose, under Settings > Chat model, which model answers their chats: the install's default, or a model from a cloud provider that is already connected to the agent (`GET /api/plugins/atrium-settings/models` lists only connected cloud providers; local, user-defined and unconnected ones are left out). The choice is saved per person (a file named by a hash of the user name) and applies to their chats, their Home ask box and the cloud notice on uploads. It is sent to Hermes as a locked model (`require_model_lock`), and choosing a cloud model needs an explicit yes because the chat text goes to that provider. Everyone else keeps the install's default; the install-wide engine switch on Home still applies to people who have not chosen. A file that was damaged or edited by hand is ignored, never trusted. Agentic coding runs keep using the install-wide engine.
+
+An install that manages its own local models can set `chat_model.LOCAL_ROUTE` to a function `route(personal) -> dict` that supplies the run fields for its default model (it may raise `HTTPException`, for example 503 while a model server is switching).
+
 ## The built-in pages
 
 - **Home** (`/`): the agent and the work on one screen. A greeting, an overall health ring (for roles that may see infrastructure), a single "Needs you" list (failed jobs, blocked cards, services down, backups, security), today's focus,

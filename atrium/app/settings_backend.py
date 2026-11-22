@@ -24,7 +24,7 @@ import re
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 # --- the agent's name --------------------------------------------------------------------------------------------
@@ -248,3 +248,62 @@ async def set_schedule(job_id: str, body: ScheduleBody) -> dict:
             raise HTTPException(status_code=502, detail="The scheduler refused that change.")
     await asyncio.to_thread(run)
     return {"ok": True, "when": human(new), "expr": cron}
+
+
+# --- your own chat model --------------------------------------------------------------------------------------------
+
+class ModelSelection(BaseModel):
+    id: str = Field(default="", max_length=240)
+    provider: str = Field(default="", max_length=80)
+    confirm: bool = False
+
+
+NOT_CLOUD = ("custom", "ollama", "lmstudio")          # providers that are the machine's own models, not a cloud service
+
+
+async def cloud_catalog() -> list:
+    """The cloud providers that are connected to the agent, with the models each offers."""
+    code, catalog = await HERMES.dash_call("GET", "/api/model/options", timeout=25)
+    if code != 200 or not isinstance(catalog, dict):
+        return []
+    out = []
+    for p in catalog.get("providers") or []:
+        if not isinstance(p, dict) or not p.get("authenticated") or p.get("is_user_defined") or p.get("slug") in NOT_CLOUD:
+            continue
+        models = [m for m in (p.get("models") or []) if isinstance(m, str)]
+        if p.get("slug") and models:
+            out.append({"id": p["slug"], "label": p.get("name") or p["slug"], "models": models})
+    return out
+
+
+@router.get("/models")
+async def models(request: Request):
+    import chat_model
+    from mission_backend import engine_state
+
+    return {"cloud": await cloud_catalog(), "engine": chat_model.selection(request.state.who["user"]) or engine_state()}
+
+
+@router.post("/models")
+async def select_model(body: ModelSelection, request: Request):
+    """Use a model from a connected cloud provider for your chats. Your chat text is sent to that provider, so it needs an explicit yes."""
+    import chat_model
+
+    if not body.provider or not body.id:
+        raise HTTPException(400, "Choose a provider and a model.")
+    if not body.confirm:
+        raise HTTPException(400, "Confirm sending your chats to this cloud provider.")
+    if not any(p["id"] == body.provider and body.id in p["models"] for p in await cloud_catalog()):
+        raise HTTPException(409, "Choose a model from a connected cloud provider.")
+    await asyncio.to_thread(chat_model.save, request.state.who["user"], {"engine": "cloud", "provider": body.provider, "model": body.id})
+    return {"ok": True}
+
+
+@router.post("/models/use-default")
+async def use_default_model(request: Request):
+    """Go back to the install's default model for your chats."""
+    import chat_model
+
+    await asyncio.to_thread(chat_model.save, request.state.who["user"], {"engine": "local"})
+    return {"ok": True}
+

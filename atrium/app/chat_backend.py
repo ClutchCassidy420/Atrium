@@ -61,6 +61,8 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
+import chat_model
+
 # --- the agent's name --------------------------------------------------------------------------------------------
 # Text in this file says {{agent}} wherever it means the agent's name. It is filled in on the way out (JSON, errors,
 # streams, files) from <data>/atrium/agent.json, which the Settings tab writes. Without it the name is "Assistant".
@@ -270,7 +272,7 @@ async def status() -> dict:
 
 
 @router.post("/send")
-async def send(body: SendBody) -> dict:
+async def send(body: SendBody, request: Request) -> dict:
     if not _SESSION_RE.fullmatch(body.session_id):
         raise HTTPException(status_code=400, detail="Invalid chat id.")
     message = body.message.strip()
@@ -294,7 +296,7 @@ async def send(body: SendBody) -> dict:
     else:
         run_input = message
     payload: dict[str, Any] = {"input": run_input, "session_id": body.session_id}
-    payload.update(_engine_override())
+    payload.update(chat_model.override(request.state.who["user"], _engine_now()))
     _, run = await _call("POST", "/v1/runs", payload)
     run_id = run.get("run_id")
     if not isinstance(run_id, str) or not _RUN_ID_RE.fullmatch(run_id):
@@ -485,12 +487,12 @@ async def doc_upload(request: Request, name: str, keep: int = 0) -> dict:
             target.unlink()
         raise
     await asyncio.to_thread(_purge_old_uploads) if not keep else None
-    st = await asyncio.to_thread(_engine_now)
+    st = chat_model.selection(request.state.who["user"]) or await asyncio.to_thread(_engine_now)
     return {
         "name": clean, "path": str(target), "size": size, "kept": bool(keep),
         "kind": info.get("kind"), "pages": info.get("pages"), "extra": info.get("extra"),
         "preview": info.get("preview", ""), "scanned": bool(info.get("scanned")),
-        "cloud": st.get("engine") == "claude",
+        "cloud": st.get("engine") in ("cloud", "claude"),
     }
 
 
@@ -1338,8 +1340,10 @@ def _engine_override() -> dict:
 
 
 @router.get("/engine")
-async def engine_info() -> dict:
-    st = await asyncio.to_thread(_engine_now)
+async def engine_info(request: Request) -> dict:
+    st = chat_model.selection(request.state.who["user"]) or await asyncio.to_thread(_engine_now)
+    if st.get("engine") == "cloud":
+        return {"engine": "claude", "label": st.get("model", ""), "seconds_left": None}
     left = max(0, int(float(st["until"]) - time.time())) if st["engine"] == "claude" and st.get("until") else None
     return {"engine": st["engine"], "label": _CLAUDE_IDS.get(st.get("model", ""), ""), "seconds_left": left}
 

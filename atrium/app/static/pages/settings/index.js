@@ -435,6 +435,41 @@
       h("p", { role: "status", className: "ats-note" }, status[0]));
   }
 
+  /* ---------- your own chat model: the install's default, or a model from a cloud provider that is already connected ---------- */
+
+  function MyChatModel() {
+    var d_ = useState(null), data = d_[0], setData = d_[1];
+    var p_ = useState(""), pick = p_[0], setPick = p_[1];
+    var m_ = useState(""), msg = m_[0], setMsg = m_[1];
+    var b_ = useState(false), busy = b_[0], setBusy = b_[1];
+    function refresh() { return fetchJSON(API + "/models").then(setData).catch(function (e) { setMsg(errText(e)); }); }
+    useEffect(function () { refresh(); }, []);
+    if (!data) return h("div", { className: "ats-card", role: "status" }, msg || "Loading models…");
+    var eng = data.engine || {}, cloud = eng.engine === "cloud";
+    var selected = pick || (cloud ? eng.provider + "::" + eng.model : "default");
+    function apply() {
+      var parts = selected.split("::");
+      if (parts.length > 1 && !window.confirm("Use this cloud model? What you type in chat is sent to " + parts[0] + ".")) return;
+      setBusy(true); setMsg("");
+      var change = parts.length > 1 ? post(API + "/models", { provider: parts.shift(), id: parts.join("::"), confirm: true }) : post(API + "/models/use-default", {});
+      change.then(function () { setPick(""); setMsg("Saved."); return refresh(); }).catch(function (e) { setMsg(errText(e)); }).finally(function () { setBusy(false); });
+    }
+    var groups = (data.cloud || []).map(function (provider) {
+      return h("optgroup", { key: provider.id, label: provider.label }, provider.models.map(function (model) {
+        return h("option", { key: model, value: provider.id + "::" + model }, model);
+      }));
+    });
+    return h("div", { className: "ats-card" },
+      h("div", { className: "ats-h" }, "Your chat model"),
+      h("div", { className: "ats-note" }, cloud ? "Your chats use " + eng.model + " from " + eng.provider + "." : "Your chats use this install's default model. You can pick a model from a connected cloud provider instead; it applies to you only."),
+      h("div", { className: "ats-row" },
+        h("select", { value: selected, className: "ats-btn", "aria-label": "Your chat model", disabled: busy, onChange: function (event) { setPick(event.target.value); } },
+          h("option", { value: "default" }, "This install's default model"), groups),
+        h("button", { type: "button", className: "ats-btn", disabled: busy, onClick: apply }, "Use model")),
+      !(data.cloud || []).length ? h("div", { className: "ats-note" }, "No cloud provider is connected to the agent yet. Connect one in the agent's own settings, then it appears here.") : null,
+      msg ? h("div", { className: /^Saved/.test(msg) ? "ats-msg" : "ats-err", role: "status" }, msg) : null);
+  }
+
   var SECTIONS = [
     { id: "general", label: "General", icon: "🛠️", note: "Your agent's name and voice, and shortcuts to the other pages.", parts: [AgentCard, VoiceCard, Shortcuts, Account] },
     { id: "notifications", label: "Notifications", icon: "🔔", note: "What is allowed to buzz your phone, and which devices get it.", parts: [Notifications, Devices] },
@@ -443,7 +478,7 @@
     { id: "avatar", label: "Avatar", icon: "🎨", note: "Pick and customise how the agent looks.", parts: [embed("avatar", "The avatar editor did not load.")] },
     { id: "memory", label: "Memory", icon: "🧠", note: "The agent's notes as a graph: every note a dot, every link a line. Read only.", parts: [embed("memory", "The memory view did not load.")] },
     { id: "engine", label: "Cloud use", icon: "☁️", note: "Which engine answers chats from the app, and what the cloud has used.", parts: [Cloud] },
-    { id: "model", label: "Chat model", icon: "🧠", note: "Choose an OpenAI-compatible endpoint for new chats.", parts: [ChatModel] },
+    { id: "model", label: "Chat model", icon: "🧠", note: "Choose an OpenAI-compatible endpoint for new chats.", parts: [ChatModel, MyChatModel] },
     { id: "connections", label: "Connections", icon: "🔌", note: "Connect external tools to Hermes.", parts: [Connections] },
     { id: "server", label: "Server", icon: "🖥️", note: "Install updates, reboot or shut down the machine this runs on. Owners only.", parts: [embed("server", "The server actions did not load.")], hostOnly: true }
   ];
