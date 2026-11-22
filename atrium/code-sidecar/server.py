@@ -21,6 +21,7 @@ import subprocess
 import termios
 import time
 import urllib.request
+import uuid
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
@@ -44,9 +45,18 @@ def authorised(value: str | None) -> bool:
     return bool(TOKEN) and bool(value) and hmac.compare_digest(value, TOKEN)
 
 
+def browser_authorised(headers) -> bool:
+    secret = os.environ.get("CDP_TOKEN", "")
+    value = headers.get("x-cdp-token", "")
+    return bool(secret and value) and hmac.compare_digest(secret, value)
+
+
 @app.middleware("http")
 async def guard(request: Request, call_next):
-    if request.url.path != "/healthz" and not authorised(request.headers.get("x-code-token")):
+    if request.url.path.rstrip("/") == "/json/version":
+        if not browser_authorised(request.headers):
+            return JSONResponse({"detail": "Not allowed."}, status_code=401)
+    elif request.url.path != "/healthz" and not authorised(request.headers.get("x-code-token")):
         return JSONResponse({"detail": "Not allowed."}, status_code=401)
     return await call_next(request)
 
@@ -266,6 +276,8 @@ async def checkpoint(request: Request):
     tmp_index = f"/tmp/idx-{os.getpid()}-{time.time_ns()}"
     env = {**GIT_ENV, "GIT_INDEX_FILE": tmp_index}
     try:
+        if git(p, "rev-parse", "--verify", "-q", "HEAD", check=False).strip():
+            git(p, "read-tree", "HEAD", env=env)
         git(p, "add", "-A", env=env)
         tree = git(p, "write-tree", env=env).strip()
         parent = subprocess.run(["git", "-c", "safe.directory=*", "-C", str(p), "rev-parse", "--verify", "-q", "HEAD"], capture_output=True, text=True, env=GIT_ENV).stdout.strip()
@@ -275,7 +287,7 @@ async def checkpoint(request: Request):
             os.remove(tmp_index)
         except OSError:
             pass
-    ref = "refs/atrium/checkpoints/%d" % int(time.time())
+    ref = "refs/atrium/checkpoints/" + uuid.uuid4().hex
     git(p, "update-ref", ref, commit)
     return {"ref": ref, "label": label, "commit": commit[:10]}
 
@@ -305,20 +317,18 @@ async def rewind(request: Request):
     tmp_index = f"/tmp/idx-{os.getpid()}-{time.time_ns()}"
     env = {**GIT_ENV, "GIT_INDEX_FILE": tmp_index}
     try:
+        if git(p, "rev-parse", "--verify", "-q", "HEAD", check=False).strip():
+            git(p, "read-tree", "HEAD", env=env)
         git(p, "add", "-A", env=env)
         tree = git(p, "write-tree", env=env).strip()
         now = git(p, "commit-tree", tree, "-m", "checkpoint: before rewind", env=env).strip()
-        git(p, "update-ref", "refs/atrium/checkpoints/%d-pre" % int(time.time()), now)
-        git(p, "read-tree", "--reset", ref, env=env)
-        # remove files that the checkpoint does not have, then restore the ones it has
-        tracked = set(git(p, "ls-files", env=env).split("\n"))
-        for f in git(p, "ls-files", "-o", "--exclude-standard", "-z", check=False).split("\0"):
-            if f and f not in tracked:
-                try:
-                    (p / f).unlink()
-                except OSError:
-                    pass
-        git(p, "checkout-index", "-a", "-f", env=env)
+        git(p, "update-ref", "refs/atrium/checkpoints/" + uuid.uuid4().hex + "-pre", now)
+        # Use the current snapshot as the old index. Git removes tracked paths
+        # absent from the target and handles file/directory transitions.
+        git(p, "read-tree", "-m", "-u", now, ref, env=env)
+        git(p, "add", "-A", env=env)
+        if git(p, "write-tree", env=env).strip() != git(p, "rev-parse", ref + "^{tree}").strip():
+            raise HTTPException(status_code=409, detail="Workspace changed during rewind. The pre-rewind checkpoint was retained.")
     finally:
         try:
             os.remove(tmp_index)
@@ -414,7 +424,6 @@ async def pty_ws(ws: WebSocket, project: str, cols: int = 100, rows: int = 30):
 
 # ---- the shared browser: one real Chromium that you (through the page) and the agent (through the debugging port) both drive ----------
 CHROME_PORT = 9223                     # Chromium listens here, on this container's own address only
-CDP_PUBLIC_PORT = 9222                 # other containers (the agent) reach the same browser here
 PROFILE = Path(os.environ.get("HOME", "/home/code")) / "chrome-profile"
 ALLOWED_URL = re.compile(r"^(https?://|about:blank$)", re.I)
 
@@ -440,39 +449,49 @@ async def chrome_supervisor():
         await asyncio.sleep(2)
 
 
-async def cdp_forwarder():
-    """Let other containers reach Chromium's debugging port (it only listens on this machine's own address)."""
-    async def pipe(r, w):
-        try:
-            while True:
-                data = await r.read(65536)
-                if not data:
-                    break
-                w.write(data)
-                await w.drain()
-        except Exception:
-            pass
-        finally:
+@app.get("/json/version/")
+@app.get("/json/version")
+async def browser_version(request: Request):
+    """Authenticated CDP discovery for the coding agent."""
+    info = await asyncio.to_thread(chrome_http, "/json/version")
+    browser_id = info["webSocketDebuggerUrl"].rsplit("/", 1)[-1]
+    info["webSocketDebuggerUrl"] = str(request.url_for("agent_browser", browser_id=browser_id))
+    return info
+
+
+@app.websocket("/devtools/browser/{browser_id}")
+async def agent_browser(ws: WebSocket, browser_id: str):
+    if not browser_authorised(ws.headers) or not re.fullmatch(r"[0-9a-fA-F-]{36}", browser_id):
+        await ws.close(code=4403)
+        return
+    await ws.accept()
+    try:
+        async with ws_connect(f"ws://127.0.0.1:{CHROME_PORT}/devtools/browser/{browser_id}", max_size=2**25) as upstream:
+            async def from_agent():
+                async for message in ws.iter_text():
+                    await upstream.send(message)
+
+            async def from_browser():
+                async for message in upstream:
+                    await ws.send_text(message)
+
+            tasks = [asyncio.create_task(from_agent()), asyncio.create_task(from_browser())]
             try:
-                w.close()
-            except Exception:
-                pass
-
-    async def handle(r, w):
+                await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            finally:
+                for task in tasks:
+                    task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+    finally:
         try:
-            ur, uw = await asyncio.open_connection("127.0.0.1", CHROME_PORT)
-        except OSError:
-            w.close()
-            return
-        await asyncio.gather(pipe(r, uw), pipe(ur, w))
-
-    await asyncio.start_server(handle, "0.0.0.0", CDP_PUBLIC_PORT)
+            await ws.close()
+        except RuntimeError:
+            pass
 
 
 @app.on_event("startup")
 async def start_browser():
     asyncio.create_task(chrome_supervisor())
-    asyncio.create_task(cdp_forwarder())
 
 
 def chrome_http(path: str, method: str = "GET"):

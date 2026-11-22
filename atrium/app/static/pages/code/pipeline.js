@@ -61,6 +61,7 @@
       h("div", { className: "pl-ptop" }, h("h2", { className: "pl-title" }, i.title), h("button", { type: "button", className: "cd-btn", onClick: p.onClose, "aria-label": "Close" }, "Close")),
       h(Steps, { stage: i.stage, state: i.state }),
       h("p", { className: "pl-status pl-st-" + i.state }, STATE_TEXT[i.state] || i.state, i.card && i.card.summary ? " · " + i.card.summary : "", i.card && i.card.error ? " · " + i.card.error : ""),
+      i.auto_error ? h("p", { className: "cd-err", role: "alert" }, "Approve everything could not start the next stage: " + i.auto_error.detail) : null,
       err ? h("div", { className: "cd-err", role: "alert" }, err) : null,
       confirm ? h("div", { className: "pl-confirm", role: "alertdialog" }, h("p", null, DOES[next].split("{agent}").join(agentName)), next === "build" ? h("p", { className: "pl-muted" }, "Make sure you have read the plan first.") : null,
         h("div", { className: "pl-row" }, h("button", { type: "button", className: "cd-btn cd-primary", disabled: busy, onClick: function () { go(function () { return send("POST", API + "/ideas/" + i.id + "/advance"); }); } }, "Yes, " + BUTTON[next].toLowerCase()),
@@ -82,25 +83,36 @@
     var o_ = useState(""), open = o_[0], setOpen = o_[1], ad_ = useState(false), adding = ad_[0], setAdding = ad_[1];
     var t_ = useState(""), title = t_[0], setTitle = t_[1], b_ = useState(""), body = b_[0], setBody = b_[1], bz_ = useState(false), busy = bz_[0], setBusy = bz_[1];
     var st_ = useState(0), stamp = st_[0], setStamp = st_[1];
+    var sc_ = useState(""), scope = sc_[0], setScope = sc_[1];                  // "all" = every project's ideas; otherwise the project picked in the page
     var alive = useRef(true);
-    function load() { return fetchJSON(API + "/ideas").then(function (r) { if (alive.current) { setData(r); setErr(""); setStamp(function (n) { return n + 1; }); } }, function (e) { if (alive.current) setErr(errText(e)); }); }
-    useEffect(function () { alive.current = true; load(); var t = setInterval(load, 15000); return function () { alive.current = false; clearInterval(t); }; }, []);
+    var proj = scope === "all" ? "all" : (props.project || "idea-pipeline");
+    var projRef = useRef(proj); projRef.current = proj;
+    function load() { return fetchJSON(API + "/ideas?project=" + encodeURIComponent(projRef.current)).then(function (r) { if (alive.current) { setData(r); setErr(""); setStamp(function (n) { return n + 1; }); } }, function (e) { if (alive.current) setErr(errText(e)); }); }
+    useEffect(function () { alive.current = true; var t = setInterval(load, 15000); return function () { alive.current = false; clearInterval(t); }; }, []);
+    useEffect(function () { setOpen(""); setAdding(false); setData(null); load(); }, [proj]);                    // another project: its own board
     function add(ev) {
       ev.preventDefault();
       if (!title.trim() || busy) return;
       setBusy(true);
-      send("POST", API + "/ideas", { title: title.trim(), body: body.trim() || null, auto: props.mode === "auto" }).then(function (r) { setBusy(false); setTitle(""); setBody(""); setAdding(false); setOpen(r.id); load(); if (props.onProjects) props.onProjects(); }, function (e2) { setBusy(false); setErr(errText(e2)); });
+      send("POST", API + "/ideas", { title: title.trim(), body: body.trim() || null, auto: props.mode === "auto", project: proj === "all" ? undefined : proj }).then(function (r) { setBusy(false); setTitle(""); setBody(""); setAdding(false); setOpen(r.id); load(); if (props.onProjects) props.onProjects(); }, function (e2) { setBusy(false); setErr(errText(e2)); });
     }
-    if (!data) return h("div", { className: "pl-page" }, err ? h("div", { className: "cd-err", role: "alert" }, err) : h("p", { className: "pl-muted" }, "Loading the pipeline…"));
+    var projSel = h("label", { className: "pl-projsel" }, h("span", { className: "pl-muted" }, "Project"),
+            h("select", { className: "cd-select", "aria-label": "Project", value: scope === "all" ? "__all__" : proj, onChange: function (e) { var v = e.target.value; if (v === "__all__") setScope("all"); else { setScope(""); if (props.onPick) props.onPick(v); } } },
+              h("option", { value: "__all__" }, "All projects"),
+              (function () { var names = (props.projects || []).slice(); if (names.indexOf("idea-pipeline") < 0) names.unshift("idea-pipeline"); return names.map(function (n) { return h("option", { key: n, value: n }, n === "idea-pipeline" ? "idea-pipeline (the incubator)" : n); }); })()));
+    if (!data) return h("div", { className: "pl-page" }, h("header", { className: "pl-head" }, h("div", null, h("h1", { className: "pl-h1" }, "Idea pipeline"), projSel)),
+      err ? h("div", { className: "cd-err", role: "alert" }, err) : h("p", { className: "pl-muted" }, "Loading the pipeline…"));
     var cols = ["idea", "research", "plan", "build", "review", "done"], sel = data.ideas.filter(function (x) { return x.id === open; })[0];
     return h("div", { className: "pl-page" },
       h("header", { className: "pl-head" },
-        h("div", null, h("h1", { className: "pl-h1" }, "Idea pipeline"), h("p", { className: "pl-muted" }, data.ideas.length + " idea" + (data.ideas.length === 1 ? "" : "s") + " · a stage starts only when you say so" + (props.mode === "auto" ? ", unless an idea is on Approve everything (new ideas start that way)" : ""))),
+        h("div", null, h("h1", { className: "pl-h1" }, "Idea pipeline"),
+          projSel,
+          h("p", { className: "pl-muted" }, data.ideas.length + " idea" + (data.ideas.length === 1 ? "" : "s") + " · a stage starts only when you say so" + (props.mode === "auto" ? ", unless an idea is on Approve everything (new ideas start that way)" : ""))),
         h("button", { type: "button", className: "cd-btn cd-primary", onClick: function () { setAdding(!adding); } }, adding ? "Cancel" : "+ Add an idea")),
       adding ? h("form", { className: "pl-add", onSubmit: add },
         h("input", { className: "cd-input", value: title, maxLength: 200, autoFocus: true, placeholder: "The idea, in a line", "aria-label": "Idea", onChange: function (e) { setTitle(e.target.value); } }),
         h("textarea", { className: "cd-input pl-ta", rows: 4, value: body, maxLength: 20000, placeholder: "More detail (optional): what you want, why, links, limits…", "aria-label": "Details", onChange: function (e) { setBody(e.target.value); } }),
-        h("div", { className: "pl-row" }, h("button", { type: "submit", className: "cd-btn cd-primary", disabled: busy || !title.trim() }, "Add to the pipeline"), h("span", { className: "pl-muted" }, "It is saved with a notes file and waits. Nothing runs until you start research."))) : null,
+        h("div", { className: "pl-row" }, h("button", { type: "submit", className: "cd-btn cd-primary", disabled: busy || !title.trim() }, "Add to the pipeline"), h("span", { className: "pl-muted" }, (proj === "all" ? "It goes to idea-pipeline (the incubator). " : proj === "idea-pipeline" ? "" : "It belongs to " + proj + " and is built there. ") + "It is saved with a notes file and waits. Nothing runs until you start research."))) : null,
       err ? h("div", { className: "cd-err", role: "alert" }, err) : null,
       h("div", { className: "pl-layout" + (sel ? " pl-with" : "") },
         h("div", { className: "pl-board" }, cols.map(function (c) {
@@ -110,10 +122,10 @@
             list.length ? list.map(function (x) {
               return h("button", { key: x.id, type: "button", className: "pl-card pl-st-" + x.state + (open === x.id ? " pl-sel" : ""), onClick: function () { setOpen(x.id); } },
                 h("div", { className: "pl-card-t" }, x.state === "working" ? h("span", { className: "pl-live" }) : null, x.title),
-                h("div", { className: "pl-chips" }, h("span", { className: "pl-chip" }, STATE_TEXT[x.state] || x.state), x.auto ? h("span", { className: "pl-chip" }, "auto") : null, x.next ? h("span", { className: "pl-chip pl-next" }, "next: " + LABEL[x.next].toLowerCase()) : null));
+                h("div", { className: "pl-chips" }, scope === "all" ? h("span", { className: "pl-chip" }, x.home) : null, h("span", { className: "pl-chip" }, STATE_TEXT[x.state] || x.state), x.auto ? h("span", { className: "pl-chip" }, "auto") : null, x.next ? h("span", { className: "pl-chip pl-next" }, "next: " + LABEL[x.next].toLowerCase()) : null));
             }) : h("p", { className: "pl-empty" }, c === "idea" ? "New ideas wait here." : "None."));
         })),
-        sel ? h(Panel, { idea: sel, notes: data.notes_project, stamp: stamp, onClose: function () { setOpen(""); }, onChanged: function () { load(); if (props.onProjects) props.onProjects(); }, onChat: props.onChat }) : null));
+        sel ? h(Panel, { idea: sel, notes: sel.home || data.notes_project, stamp: stamp, onClose: function () { setOpen(""); }, onChanged: function () { load(); if (props.onProjects) props.onProjects(); }, onChat: props.onChat }) : null));
   }
 
   window.__APP_PIPELINE__ = Pipeline;

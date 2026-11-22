@@ -65,6 +65,7 @@ class Config:
     mail_smtp_port: int = 465
     mail_smtp_tls_server_name: str = ""
     mail_webmail_url: str = ""                 # optional: the full webmail, for an "Open webmail" link
+    kanban_workspaces_dir: str = ""            # where the agent's container keeps kanban card workspaces (default /opt/data/kanban/workspaces)
     deck_dir: str = ""                       # folder of status files written by this install's own jobs (monitors, system, weather...)
     systems: dict = field(default_factory=dict)   # the services, websites and model lists to show (instance systems.json)
 
@@ -121,6 +122,7 @@ def load(env: dict | None = None) -> Config:
     cfg.action_gate_url = e.get("ACTION_GATE_URL", "")
     cfg.host_action_url = e.get("HOST_ACTION_URL", "")
     cfg.host_action_key = e.get("HOST_ACTION_KEY", "")
+    cfg.kanban_workspaces_dir = e.get("HERMES_KANBAN_WORKSPACES", "")
     cfg.nextcloud_url = e.get("NEXTCLOUD_URL", "")
     cfg.nextcloud_host = e.get("NEXTCLOUD_HOST", "")
     cfg.nextcloud_user = e.get("NEXTCLOUD_USER", "")

@@ -11,6 +11,7 @@ services:
     container_name: atrium-code
     restart: unless-stopped
     environment:
+      CDP_TOKEN: "${CDP_TOKEN:-}"      # optional separate credential for the agent browser
       CODE_TOKEN: "${CODE_TOKEN}"        # shared secret with the web app (put it in .env next to this file)
       WORKSPACE: /workspace
       TZ: "America/Chicago"
@@ -19,7 +20,7 @@ services:
       - /srv/example/code-home:/home/code   # the terminal's home folder (shell history, tool caches); give it to the same user id
     networks:
       core:
-        ipv4_address: 172.20.0.60
+        ipv4_address: 172.31.0.60
 networks:
   core:
     external: true

@@ -9,6 +9,7 @@ HERMES_API_KEY=             # held server-side only
 HERMES_DASHBOARD_BASE=      # the dashboard server, for /api/status, /api/sessions and similar
 HERMES_DASHBOARD_TOKEN=     # only if the fixed-token option is chosen (see docs/STAGE0-FINDINGS.md, section 4)
 HERMES_DATA_DIR=            # the Hermes data folder, mounted into the app
+HERMES_KANBAN_WORKSPACES=   # optional: where the agent's container keeps kanban card workspaces, if not /opt/data/kanban/workspaces
 DECK_DATA_DIR=              # optional: a folder of status files your own jobs write (status.json, system.json, extra.json, weather.json, river.json)
 
 # Services

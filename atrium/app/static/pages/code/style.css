@@ -167,3 +167,4 @@
 .pl-tab.pl-on { border-color: var(--cd-accent); background: rgba(255,255,255,.07); }
 .pl-text { max-height: 24rem; overflow: auto; margin: 0; padding: .7rem; font-size: .8rem; border-radius: 9px; background: rgba(0,0,0,.3); white-space: pre-wrap; overflow-wrap: anywhere; }
 @media (max-width: 900px) { .pl-layout.pl-with { grid-template-columns: minmax(0, 1fr); } .pl-with .pl-board { display: none; } .pl-panel { position: static; max-height: none; } .pl-col { flex-basis: 78vw; } }
+.pl-projsel { display: inline-flex; align-items: center; gap: .5rem; margin: .2rem 0 .1rem; }

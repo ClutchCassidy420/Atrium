@@ -6,6 +6,11 @@
   Mail connections are always verified (IMAP and SMTP implicit TLS); move and delete act on one message by UID; large messages are never truncated;
   sends are idempotent (`submission_id`) and report success once the server accepted the message even if saving to Sent fails. Uploads never replace
   an existing file unless asked. Synthetic tests: `tests/test_mail.py`, `tests/test_nextcloud.py`.
+- **Agentic coding and the idea pipeline.** Sessions belong to projects, linked kanban cards show their worker runs read-only, and ideas belong to a
+  project and are built inside it after a restore point (a failed restore point stops the build). Retrying an interrupted stage no longer creates a
+  second card or project, and Approve everything records why it stopped. Sidecar: unique restore-point names, verified rewind, terminal access
+  re-checked while open, and the agent's browser is reached through an authenticated entry point (`CDP_TOKEN`) instead of an open port.
+  Tests: `tests/test_sidecar.py` plus additions to `tests/test_code.py` and `tests/test_pipeline.py`.
 
 ## 1.0.1 (license change)
 

@@ -9,6 +9,7 @@ from conftest import PW, PW2, login
 H = {"origin": "https://app.test"}
 TOKEN = "sidecar-secret"
 SEEN = []
+ROWS = {}                      # session rows per source ("api_server", "kanban", "subagent") for the paging and related-work tests
 
 
 class Sidecar(BaseHTTPRequestHandler):
@@ -56,6 +57,11 @@ class FakeHermes:
                 {"id": "2", "role": "assistant", "content": "", "tool_calls": json.dumps([{"call_id": "c1", "function": {"name": "terminal", "arguments": "{\"command\":\"ls\"}"}}])},
                 {"id": "3", "role": "tool", "content": "a.py", "tool_name": "terminal", "tool_call_id": "c1"},
                 {"id": "4", "role": "assistant", "content": "Done."}, {"id": "5", "role": "system", "content": "hidden"}]}
+        if path.startswith("/api/sessions") and ROWS:
+            from urllib.parse import parse_qs, urlsplit
+            q = parse_qs(urlsplit(path).query)
+            rows, off, lim = ROWS.get((q.get("source") or [""])[0], []), int((q.get("offset") or ["0"])[0]), int((q.get("limit") or ["100"])[0])
+            return 200, {"sessions": rows[off:off + min(lim, 100)]}
         if path.startswith("/api/sessions"):
             return 200, {"sessions": [{"id": "atrium-chat-codeabc123", "title": "Make it blue", "message_count": 4, "last_active": 1}, {"id": "atrium-chat-other12", "title": "Chat"}]}
         return 404, {}
@@ -70,6 +76,7 @@ def code(make, cfg, monkeypatch):
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     cfg.code_url, cfg.code_token = "http://127.0.0.1:%d" % srv.server_address[1], TOKEN
     SEEN.clear()
+    ROWS.clear()
     import chat_backend
     calls = []
 
@@ -149,3 +156,62 @@ def test_attached_files_are_passed_to_the_workspace(code):
     code.as_("alice", PW, "10.8.0.6")
     sent = code.post("/api/code/send", json={"project": "shop", "message": "look\n\nAttached: @attachments/notes.pdf"}, headers=H).json()
     assert "attachments" in code.calls[-1][2]["instructions"] and sent["run_id"] == "run_9"
+
+
+# ---------------------------------------------------------------- sessions belong to projects; a card's worker runs show as related work
+
+def coding(i, **k):
+    return dict({"id": "atrium-chat-code%06d" % i, "title": "Session %d" % i, "message_count": 2, "last_active": 1000 - i, "source": "api_server"}, **k)
+
+
+def test_a_session_is_listed_under_its_own_project_only(code):
+    sid = code.post("/api/code/send", json={"project": "shop", "message": "hello"}, headers=H).json()["session_id"]
+    ROWS["api_server"] = [coding(1, id=sid), coding(2)]                   # session 2 predates projects: it was never tied to one
+    mine = {s["id"]: s for s in code.get("/api/code/sessions", params={"project": "shop"}).json()["sessions"]}
+    assert mine[sid]["legacy"] is False and mine["atrium-chat-code000002"]["legacy"] is True
+    other = {s["id"] for s in code.get("/api/code/sessions", params={"project": "blog"}).json()["sessions"]}
+    assert sid not in other and "atrium-chat-code000002" in other         # older sessions stay reachable from every project
+    assert code.get("/api/code/sessions", params={"project": "../x"}).status_code == 400
+
+
+def test_old_sessions_are_not_lost_behind_the_scheduled_check_ins(code):
+    noise = [{"id": "cron-%d" % i, "source": "api_server", "message_count": 0, "last_active": 5000 - i} for i in range(120)]      # empty check-ins fill the first pages
+    ROWS["api_server"] = noise + [coding(7, last_active=1)]
+    ids = [s["id"] for s in code.get("/api/code/sessions", params={"project": "shop"}).json()["sessions"]]
+    assert ids == ["atrium-chat-code000007"]
+
+
+def test_related_work_comes_from_the_linked_card_and_is_read_only(code, make, cfg):
+    import dataclasses
+    assert code.put("/api/code/links", json={"project": "shop", "card": "t_032dcd3a", "title": "Fix the header"}, headers=H).status_code == 200
+    ROWS["kanban"] = [{"id": "local-0123456789abcdef0123", "source": "kanban", "cwd": "/opt/data/kanban/workspaces/t_032dcd3a", "message_count": 5, "last_active": 9},
+                      {"id": "local-aaaaaaaaaaaaaaaaaaaa", "source": "kanban", "cwd": "/opt/data/kanban/workspaces/t_other999", "message_count": 5, "last_active": 8},
+                      {"id": "local-bbbbbbbbbbbbbbbbbbbb", "source": "kanban", "cwd": "/opt/data/kanban/workspaces/t_032dcd3a", "message_count": 0, "last_active": 7}]
+    ROWS["subagent"] = [{"id": "20261121_101500_abcdef12", "source": "subagent", "title": "Check the CSS", "cwd": "/opt/data/kanban/workspaces/t_032dcd3a", "message_count": 3, "last_active": 6}]
+    got = code.get("/api/code/sessions", params={"project": "shop"}).json()
+    assert [r["id"] for r in got["related"]] == ["local-0123456789abcdef0123", "20261121_101500_abcdef12"]       # not the other card, not an empty run
+    assert got["related"][0]["title"] == "Worker run - Fix the header" and got["link"]["card"] == "t_032dcd3a"
+    assert code.get("/api/code/messages", params={"session_id": "local-0123456789abcdef0123"}).status_code == 200      # readable
+    assert code.get("/api/code/messages", params={"session_id": "anything-else"}).status_code == 400                   # but not any session id
+    sent = code.post("/api/code/send", json={"project": "shop", "message": "x", "session_id": "local-0123456789abcdef0123"}, headers=H).json()
+    assert sent["session_id"] != "local-0123456789abcdef0123" and sent["session_id"].startswith("atrium-chat-code")      # a worker run is never continued: a fresh session starts
+    assert code.calls[-1][2]["session_id"] == sent["session_id"]
+    # where the agent keeps card workspaces is a setting, not a built-in path
+    custom = make(users=(("alice", "owner", PW),), hermes=FakeHermes(), config=dataclasses.replace(cfg, data_dir=cfg.data_dir / "k", kanban_workspaces_dir="/srv/agent/cards/"))
+    assert login(custom, "alice", PW, ip="10.8.0.31").status_code == 303
+    custom.put("/api/code/links", json={"project": "shop", "card": "t_032dcd3a"}, headers=H)
+    ROWS["kanban"] = [{"id": "local-0123456789abcdef0123", "source": "kanban", "cwd": "/srv/agent/cards/t_032dcd3a", "message_count": 5, "last_active": 9}]
+    ROWS["subagent"] = []
+    assert [r["id"] for r in custom.get("/api/code/sessions", params={"project": "shop"}).json()["related"]] == ["local-0123456789abcdef0123"]
+
+
+def test_links_are_validated_and_can_be_removed(code):
+    for bad in ({"project": "shop", "card": "not-a-card"}, {"project": "", "card": "t_032dcd3a"}, {"project": "../x", "card": "t_032dcd3a"}):
+        assert code.put("/api/code/links", json=bad, headers=H).status_code == 400, bad
+    assert code.put("/api/code/links", json={"project": "shop", "card": "t_032dcd3a"}, headers={"origin": "https://evil.example"}).status_code == 403
+    code.put("/api/code/links", json={"project": "shop", "card": "t_032dcd3a"}, headers=H)
+    assert code.get("/api/code/sessions", params={"project": "shop"}).json()["link"]["card"] == "t_032dcd3a"
+    code.put("/api/code/links", json={"project": "shop", "card": None}, headers=H)
+    assert code.get("/api/code/sessions", params={"project": "shop"}).json()["link"] is None
+    code.as_("bob", PW2, "10.8.0.32")
+    assert code.put("/api/code/links", json={"project": "shop", "card": "t_032dcd3a"}, headers=H).status_code == 403
