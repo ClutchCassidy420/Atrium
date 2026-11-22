@@ -1,0 +1,26 @@
+# The coding workspace: files, git and a shared terminal for the Agentic coding page. Internal network only (no published ports).
+# It sees the workspace folder and nothing else of the server unless you add more mounts here. Copy to your install and edit the paths.
+services:
+  code:
+    build:
+      context: .
+      args:
+        UID: 2000      # the agent's user id and group id on your server, so you both can change each other's files
+        GID: 2000
+    image: atrium-code:1
+    container_name: atrium-code
+    restart: unless-stopped
+    environment:
+      CODE_TOKEN: "${CODE_TOKEN}"        # shared secret with the web app (put it in .env next to this file)
+      WORKSPACE: /workspace
+      TZ: "America/Chicago"
+    volumes:
+      - /srv/example/workspace:/workspace   # the same folder the agent works in, so you and the agent see the same files
+      - /srv/example/code-home:/home/code   # the terminal's home folder (shell history, tool caches); give it to the same user id
+    networks:
+      core:
+        ipv4_address: 172.20.0.60
+networks:
+  core:
+    external: true
+    name: app-core

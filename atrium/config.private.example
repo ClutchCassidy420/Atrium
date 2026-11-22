@@ -1,0 +1,21 @@
+# Copy to config.private.env (git-ignored) and fill in on the server. Never commit real values.
+
+# Where the app is served
+APP_HOSTNAME=
+
+# Hermes
+HERMES_API_BASE=            # the agent API server (runs, events, stop, approval)
+HERMES_API_KEY=             # held server-side only
+HERMES_DASHBOARD_BASE=      # the dashboard server, for /api/status, /api/sessions and similar
+HERMES_DASHBOARD_TOKEN=     # only if the fixed-token option is chosen (see docs/STAGE0-FINDINGS.md, section 4)
+HERMES_DATA_DIR=            # the Hermes data folder, mounted into the app
+DECK_DATA_DIR=              # optional: a folder of status files your own jobs write (status.json, system.json, extra.json, weather.json, river.json)
+
+# Services
+TTS_URL=                    # optional: text-to-speech endpoint for read-aloud, e.g. http://tts:8880/v1/audio/speech
+ACTION_GATE_URL=            # optional: the approval service for the agent's proposed actions (leave empty if you have none)
+PUSH_PROXY=                 # optional: an outbound proxy for push messages (needed when the app's network has no direct internet; allow the push services in it)
+PUSH_ENABLED=               # 1 turns on phone notifications and the installable phone app (owners only); needs the cryptography package
+
+# Login
+OWNER_PASSWORD_HASH=        # optional: creates the first owner user if no users exist yet. Afterwards manage people with scripts/manage_users.py

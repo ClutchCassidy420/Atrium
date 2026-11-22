@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security problem
+    url: https://github.com/ClutchCassidy420/Atrium-Front-End-for-Hermes-Agent/security/advisories/new
+    about: Please report security problems privately here, not as a public issue.

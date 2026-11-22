@@ -1,0 +1,246 @@
+"""Atrium memory backend, vendored from the Atrium Loom plugin and adapted to run inside the Atrium web app.
+
+Adaptations: none (it only reads the notes vault, which the app mounts read-only).
+
+Original description follows.
+
+Atrium Loom: Memory (dashboard plugin backend).
+
+Reads the agent's Obsidian-compatible vault (plain markdown files) and serves it as a graph.
+
+Routes (mounted by the Hermes dashboard under /api/plugins/atrium-memory):
+  GET /graph          every note as a node, every [[wikilink]] as an edge, plus folders and recent notes
+  GET /note?path=     one note's text with its links and backlinks
+  GET /search?q=      notes whose title or text contain the words
+
+Read-only: nothing here writes to the vault. The vault is <HERMES_HOME>/obsidian-vault.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import os
+import re
+from pathlib import Path
+from typing import Optional
+
+from fastapi import APIRouter, HTTPException
+
+# --- the agent's name --------------------------------------------------------------------------------------------
+# Text in this file says {{agent}} wherever it means the agent's name. It is filled in on the way out (JSON, errors,
+# streams, files) from <data>/atrium/agent.json, which the Settings tab writes. Without it the name is "Assistant".
+
+_AGENT_NAME_RE = __import__("re").compile(r"^[A-Za-z0-9][A-Za-z0-9 ._'-]{0,39}$")
+_agent_cache: dict = {"t": 0.0, "v": "Assistant"}
+
+
+def _agent_name() -> str:
+    import json as _json
+    import os as _os
+    import time as _time
+    from pathlib import Path as _Path
+    if _time.time() - _agent_cache["t"] < 5:
+        return _agent_cache["v"]
+    name = "Assistant"
+    try:
+        home = _Path(_os.environ.get("HERMES_HOME") or "/opt/data")
+        value = _json.loads((home / "atrium" / "agent.json").read_text(encoding="utf-8")).get("name")
+        if isinstance(value, str) and _AGENT_NAME_RE.match(value.strip()):
+            name = value.strip()
+    except (OSError, ValueError, AttributeError):
+        pass
+    _agent_cache.update({"t": _time.time(), "v": name})
+    return name
+
+
+def _T(text):
+    return text.replace("{{agent}}", _agent_name()) if isinstance(text, str) and "{{agent}}" in text else text
+
+
+def _fill(resp):
+    body = getattr(resp, "body", None)
+    if isinstance(body, (bytes, bytearray)) and b"{{agent}}" in body:
+        resp.body = bytes(body).replace(b"{{agent}}", _agent_name().encode("utf-8"))
+        resp.headers["content-length"] = str(len(resp.body))
+    elif hasattr(resp, "body_iterator"):
+        inner = resp.body_iterator
+
+        async def _gen():
+            async for chunk in inner:
+                if isinstance(chunk, (bytes, bytearray)):
+                    yield bytes(chunk).replace(b"{{agent}}", _agent_name().encode("utf-8"))
+                elif isinstance(chunk, str):
+                    yield _T(chunk)
+                else:
+                    yield chunk
+        resp.body_iterator = _gen()
+    return resp
+
+
+from fastapi.routing import APIRoute as _APIRoute  # noqa: E402
+
+
+class _AgentRoute(_APIRoute):
+    def get_route_handler(self):
+        original = super().get_route_handler()
+
+        async def handler(request):
+            try:
+                resp = await original(request)
+            except HTTPException as exc:
+                detail = _T(exc.detail) if isinstance(exc.detail, str) else exc.detail
+                raise HTTPException(status_code=exc.status_code, detail=detail, headers=exc.headers) from None
+            return _fill(resp)
+        return handler
+
+
+router = APIRouter(route_class=_AgentRoute)
+
+MAX_NOTES = 3000
+MAX_NOTE_BYTES = 400_000
+BODY_CHARS = 30_000
+_WIKI = re.compile(r"\[\[([^\]\n]{1,200})\]\]")
+_SKIP_DIRS = {".obsidian", ".trash", ".git", "node_modules"}
+
+
+def _vault() -> Path:
+    return Path(os.environ.get("HERMES_HOME") or "/opt/data") / "obsidian-vault"
+
+
+def _scan() -> list[dict]:
+    root = _vault()
+    notes: list[dict] = []
+    if not root.is_dir():
+        return notes
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS and not d.startswith(".")]
+        for fn in filenames:
+            if not fn.lower().endswith(".md"):
+                continue
+            p = Path(dirpath) / fn
+            try:
+                st = p.stat()
+                if st.st_size > MAX_NOTE_BYTES:
+                    continue
+                text = p.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
+            rel = p.relative_to(root).as_posix()
+            first = ""
+            title = Path(fn).stem
+            for line in text.splitlines():
+                s = line.strip()
+                if not s:
+                    continue
+                if s.startswith("#") and title == Path(fn).stem and not first:
+                    title = s.lstrip("# ").strip() or title
+                    continue
+                if not s.startswith("#"):
+                    first = re.sub(r"[*_`>\[\]]+", "", s)[:140]
+                    break
+            notes.append({"id": rel, "title": title[:100], "folder": rel.split("/")[0] if "/" in rel else "(top)", "size": st.st_size,
+                          "mtime": int(st.st_mtime), "summary": first, "text": text})
+            if len(notes) >= MAX_NOTES:
+                return notes
+    return notes
+
+
+def _resolver(notes: list[dict]):
+    by_path = {n["id"].lower(): n["id"] for n in notes}
+    by_nopath = {n["id"][:-3].lower(): n["id"] for n in notes}
+    by_base: dict[str, list[str]] = {}
+    for n in notes:
+        by_base.setdefault(Path(n["id"]).stem.lower(), []).append(n["id"])
+
+    def resolve(target: str) -> Optional[str]:
+        t = target.split("|")[0].split("#")[0].strip().lower()
+        if not t:
+            return None
+        if t in by_path:
+            return by_path[t]
+        if t in by_nopath:
+            return by_nopath[t]
+        cands = by_base.get(Path(t).stem.lower(), [])
+        return cands[0] if len(cands) == 1 else None
+    return resolve
+
+
+def _links(notes: list[dict]) -> dict[str, set[str]]:
+    resolve = _resolver(notes)
+    out: dict[str, set[str]] = {}
+    for n in notes:
+        targets = set()
+        for m in _WIKI.finditer(n["text"]):
+            r = resolve(m.group(1))
+            if r and r != n["id"]:
+                targets.add(r)
+        out[n["id"]] = targets
+    return out
+
+
+@router.get("/graph")
+async def graph() -> dict:
+    def build() -> dict:
+        notes = _scan()
+        links = _links(notes)
+        incoming: dict[str, int] = {}
+        edges = []
+        for src, targets in links.items():
+            for t in targets:
+                edges.append([src, t])
+                incoming[t] = incoming.get(t, 0) + 1
+        folders: dict[str, int] = {}
+        for n in notes:
+            folders[n["folder"]] = folders.get(n["folder"], 0) + 1
+        nodes = [{"id": n["id"], "title": n["title"], "folder": n["folder"], "summary": n["summary"], "mtime": n["mtime"], "size": n["size"],
+                  "out": len(links[n["id"]]), "in": incoming.get(n["id"], 0)} for n in notes]
+        recent = sorted(nodes, key=lambda x: x["mtime"], reverse=True)[:8]
+        return {"nodes": nodes, "edges": edges, "folders": [{"name": k, "count": v} for k, v in sorted(folders.items())],
+                "recent": [r["id"] for r in recent], "truncated": len(notes) >= MAX_NOTES}
+    return await asyncio.to_thread(build)
+
+
+@router.get("/note")
+async def note(path: str) -> dict:
+    def read() -> dict:
+        root = _vault().resolve()
+        try:
+            target = (root / path).resolve()
+        except (OSError, ValueError):
+            raise HTTPException(status_code=404, detail="Not found.") from None
+        if root not in target.parents or target.suffix.lower() != ".md" or any(p.startswith(".") for p in target.relative_to(root).parts):
+            raise HTTPException(status_code=404, detail="Not found.")
+        try:
+            if not target.is_file() or target.stat().st_size > MAX_NOTE_BYTES:
+                raise HTTPException(status_code=404, detail="Not found.")
+            text = target.read_text(encoding="utf-8", errors="ignore")
+            mtime = int(target.stat().st_mtime)
+        except OSError:
+            raise HTTPException(status_code=404, detail="Not found.") from None
+        notes = _scan()
+        links = _links(notes)
+        rel = target.relative_to(root).as_posix()
+        titles = {n["id"]: n["title"] for n in notes}
+        return {"id": rel, "title": titles.get(rel, Path(rel).stem), "mtime": mtime, "body": text[:BODY_CHARS], "cut": len(text) > BODY_CHARS,
+                "links": [{"id": t, "title": titles.get(t, t)} for t in sorted(links.get(rel, set()))],
+                "backlinks": [{"id": s, "title": titles.get(s, s)} for s, ts in links.items() if rel in ts]}
+    return await asyncio.to_thread(read)
+
+
+@router.get("/search")
+async def search(q: str) -> dict:
+    words = [w for w in re.split(r"\s+", q.lower().strip()) if w][:6]
+    if not words or len(q) > 200:
+        return {"results": []}
+
+    def run() -> list[dict]:
+        out = []
+        for n in _scan():
+            hay = (n["title"] + " " + n["id"] + " " + n["text"]).lower()
+            if all(w in hay for w in words):
+                body = n["text"]
+                pos = body.lower().find(words[0])
+                snip = re.sub(r"\s+", " ", body[max(0, pos - 40): pos + 120]) if pos >= 0 else n["summary"]
+                out.append({"id": n["id"], "title": n["title"], "folder": n["folder"], "snippet": snip.strip()[:160]})
+        return out[:30]
+    return {"results": await asyncio.to_thread(run)}
