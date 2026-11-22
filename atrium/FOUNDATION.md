@@ -14,7 +14,7 @@ Choose a password of at least 12 characters for the initial **owner** account at
 
 Open http://localhost:18648/login on the same machine. The dashboard and gateway listen on loopback ports 18644 and 18645. For HTTPS, set ATRIUM_TLS_CERT and ATRIUM_TLS_KEY to an appropriate trusted certificate chain and its PEM private key before starting. Open the HTTPS URL matching that certificate. Session cookies retain their Secure flag.
 
-By default the profile lives under `$XDG_DATA_HOME/atrium` or `~/.local/share/atrium`. Override it with ATRIUM_STATE_DIR for a disposable install. Keep the directory private (0700) and outside the checkout. Configure the model and provider in the profile's runtime/config.yaml and supply the provider credentials through the runtime's supported configuration. Provider onboarding through Atrium is still pending.
+By default the profile lives under `$XDG_DATA_HOME/atrium` or `~/.local/share/atrium`. Override it with ATRIUM_STATE_DIR for a disposable install. Keep the directory private (0700) and outside the checkout. Sign in as owner and open **Settings → Chat model**. Enter the OpenAI-compatible API base URL, exact model ID and optional key, then select **Use model**. Start a fresh chat to use the saved model. Remote endpoints require HTTPS. A local model on the same host can use a loopback HTTP URL.
 
 For development with existing Python environments, atrium/dev-stack.sh accepts ATRIUM_RUNTIME_PYTHON, ATRIUM_WEB_PYTHON, ATRIUM_STATE_DIR, API_SERVER_KEY and HERMES_DASHBOARD_SESSION_TOKEN.
 
