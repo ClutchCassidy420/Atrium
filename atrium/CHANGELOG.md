@@ -22,6 +22,10 @@
 - **Home**: a one-line "what the agent is working on now", KPI tiles, SVG charts and gauges, a "Coming up" calendar card (only when a Nextcloud is
   configured), themed radar icons and trailing-link radar lines. A chat that spoke in the last 90 seconds now counts as work (scheduled check-ins never
   do). Tests: new cases in `tests/test_overview.py`.
+- **Chat approvals**: one card per request showing the full command, no Approve button without a command, no buttons for requests that cannot be
+  answered, one answer per click, and answers refused for a run that is no longer current (a stale card can no longer approve something in a later run).
+  **Live read-aloud**: each sentence is spoken as soon as it has printed. Tests: `tests/chat-approval.test.js`, `tests/chat-live.test.js`,
+  `tests/test_chat_assets.py`.
 
 ## 1.0.1 (license change)
 
