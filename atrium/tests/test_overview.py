@@ -265,8 +265,8 @@ def test_display_name_reaches_the_pages(make, cfg):
 
 
 class StubHermes:
-    def __init__(self, status, board=None, jobs=None):
-        self.data = {"/api/status": status, "/api/sessions/stats": {}, "/api/analytics/usage": {}, "/api/sessions?limit=6": {"sessions": []},
+    def __init__(self, status, board=None, jobs=None, sessions=None):
+        self.data = {"/api/status": status, "/api/sessions/stats": {}, "/api/analytics/usage": {}, "/api/sessions?limit=15": {"sessions": sessions or []},
                      "/api/plugins/kanban/board": board or {"columns": []}, "/api/cron/jobs": {"jobs": jobs or []}}
 
     async def dash_json(self, path):
@@ -286,3 +286,81 @@ def test_a_stuck_busy_flag_does_not_count_as_working():
     assert home["agent"]["busy"] is True and home["agent"]["active_agents"] == 1
     idle = asyncio.run(ov.Overview(StubHermes(stuck, jobs=[{"name": "Nightly", "state": "scheduled"}])).home(infra=False, today=TODAY, now=NOW))
     assert idle["agent"]["busy"] is False
+
+
+# ---- what the agent is doing right now ---------------------------------------------------------------------------------
+
+def test_the_doing_sentence_says_what_is_running_and_nothing_when_idle():
+    assert ov.doing_sentence([], [], 0) is None and ov.doing_sentence(["", "  "], ["", "?"], 0) is None            # blanks and unknown jobs are not work
+    assert ov.doing_sentence(["Fix the header"], ["Nightly"], 1) == "Working on: Fix the header."                    # a card names the work, so it comes first
+    assert ov.doing_sentence(["A", "B", "C"], [], 0) == "Working on: A (and 2 more)."
+    assert ov.doing_sentence([], ["Nightly radar"], 1) == "Running the Nightly radar job."
+    assert ov.doing_sentence([], ["One", "Two"], 0) == "Running the One job (and 1 more)."
+    assert ov.doing_sentence([], [], 2) == "Answering a message."
+    long = ov.doing_sentence(["word " * 60], [], 0)
+    assert long.endswith("….") and len(long) <= len("Working on: ") + 110 + 1                                      # a long title is cut, not dumped
+    assert ov.doing_sentence(["Ends with a dot."], [], 0) == "Working on: Ends with a dot."                          # no doubled full stop
+
+
+def test_times_from_hermes_are_read_in_any_of_its_forms():
+    assert ov._to_ms(1_700_000_000) == 1_700_000_000_000 and ov._to_ms(1_700_000_000.5) == 1_700_000_000_500           # seconds
+    assert ov._to_ms(1_700_000_000_000) == 1_700_000_000_000                                                         # already milliseconds
+    assert ov._to_ms("2026-11-22T00:00:00Z") == ov._to_ms("2026-11-22T00:00:00+00:00") and ov._to_ms("2026-11-22T00:00:00Z") > 1_700_000_000_000
+    for bad in (None, "", "yesterday", "2026-13-45", [], {}):
+        assert ov._to_ms(bad) is None
+
+
+def _quiet():
+    return {"gateway_running": True, "gateway_busy": False, "active_agents": 0, "gateway_platforms": {"api_server": {"metrics": {"active_runs": 0}}}}
+
+
+def test_an_open_chat_that_just_spoke_is_real_work_but_check_ins_and_old_ones_are_not():
+    import time
+    now = time.time()
+    sessions = [
+        {"id": "a", "title": "Plan the launch", "source": "tui", "last_active": now - 20},                          # open and active a moment ago
+        {"id": "b", "title": "Scheduled check-in", "source": "cron", "last_active": now - 5},                       # cron keeps empty sessions open: never work
+        {"id": "c", "title": "Finished chat", "source": "tui", "last_active": now - 5, "ended_at": now - 1},        # ended
+        {"id": "d", "title": "Quiet chat", "source": "tui", "last_active": now - 600},                              # not for 10 minutes
+        {"id": "e", "title": "No time recorded", "source": "tui"},
+    ]
+    a = asyncio.run(ov.Overview(StubHermes(_quiet(), sessions=sessions))._agent())
+    assert a["busy"] is True and a["active_agents"] == 1 and a["running_titles"] == ["Plan the launch"]
+    none = asyncio.run(ov.Overview(StubHermes(_quiet(), sessions=sessions[1:]))._agent())
+    assert none["busy"] is False and none["running_titles"] == []
+
+
+def test_the_recent_chats_list_stays_short_even_though_more_are_fetched():
+    many = [{"id": "s%d" % i, "title": "Chat %d" % i, "source": "tui", "message_count": 1, "last_active": 1000 - i} for i in range(15)]
+    a = asyncio.run(ov.Overview(StubHermes(_quiet(), sessions=many))._agent())
+    assert len(a["recent"]) == 6 and a["recent"][0]["id"] == "s0"
+
+
+def test_home_carries_the_sentence_for_the_page():
+    card = {"columns": [{"name": "running", "tasks": [{"id": "t9", "title": "Draft the newsletter"}]}]}
+    home = asyncio.run(ov.Overview(StubHermes(_quiet(), board=card)).home(infra=False, today=TODAY, now=NOW))
+    assert home["agent"]["doing"] == "Working on: Draft the newsletter."
+    jobs = asyncio.run(ov.Overview(StubHermes(_quiet(), jobs=[{"name": "Nightly", "state": "running"}])).home(infra=False, today=TODAY, now=NOW))
+    assert jobs["agent"]["doing"] == "Running the Nightly job."
+    idle = asyncio.run(ov.Overview(StubHermes(_quiet())).home(infra=False, today=TODAY, now=NOW))
+    assert idle["agent"]["doing"] is None
+
+
+# ---- the radar ----------------------------------------------------------------------------------------------------------
+
+def test_a_link_at_the_end_of_a_radar_line_becomes_the_link(tmp_path):
+    vault = tmp_path / "v"
+    (vault / "Radar").mkdir(parents=True)
+    (vault / "Radar" / "2026-11-20.md").write_text(
+        "1. **Tail link** | Tools | why it matters https://example.com/tail\n"
+        "2. **Explicit link** | News | reason | https://example.com/explicit\n"
+        "3. **Both** | News | reason https://example.com/ignored | https://example.com/wins\n"
+        "4. **Not a web link** | Misc | see ftp://example.com/file\n"
+        "5. **Mid link** | Misc | look at https://example.com/mid for details\n", encoding="utf-8")
+    items = {i["title"]: i for i in ov.latest_radar(vault)["items"]}
+    assert (items["Tail link"]["url"], items["Tail link"]["why"]) == ("https://example.com/tail", "why it matters")
+    assert items["Explicit link"]["url"] == "https://example.com/explicit"
+    assert items["Both"]["url"] == "https://example.com/wins"
+    assert items["Not a web link"]["url"] == ""
+    assert (items["Mid link"]["url"], items["Mid link"]["why"]) == ("", "look at https://example.com/mid for details")        # only a trailing link counts
+

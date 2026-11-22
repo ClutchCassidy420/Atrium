@@ -19,6 +19,9 @@
 - **Sidebar**: a collapsible icon rail (remembered per browser), an optional accordion mode (`accordion_nav = true` in `instance.toml`), and a name and
   title on every entry. The sidebar tests (`nav.test.js`, `shim.test.js`) read each label's own element, which fixes the failures they had since the
   sidebar started drawing an icon tile beside each label. Tests: `tests/nav.test.js` (new cases), `tests/test_navigation.py`.
+- **Home**: a one-line "what the agent is working on now", KPI tiles, SVG charts and gauges, a "Coming up" calendar card (only when a Nextcloud is
+  configured), themed radar icons and trailing-link radar lines. A chat that spoke in the last 90 seconds now counts as work (scheduled check-ins never
+  do). Tests: new cases in `tests/test_overview.py`.
 
 ## 1.0.1 (license change)
 
