@@ -19,6 +19,7 @@ import asyncio
 import json
 import re
 import secrets
+import threading
 from urllib.parse import urlencode
 
 import httpx
@@ -30,6 +31,10 @@ NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,59}$")
 PASS_GET = ("/projects", "/tree", "/files", "/file", "/git/status", "/git/diff", "/git/checkpoints", "/browser/targets")
 PASS_POST = ("/projects", "/git/checkpoint", "/git/rewind", "/browser/new", "/browser/close")
 SESSION = re.compile(r"^atrium-chat-code[a-z0-9]{6,30}$")
+# a worker run or subagent of a linked kanban card: read-only here (the ids Hermes gives them)
+RELATED = re.compile(r"^(local-[0-9a-f]{16,64}|[0-9]{8}_[0-9]{6}_[0-9a-f]{6,12})$")
+CARD = re.compile(r"^t_[0-9a-f]{6,16}$")
+DEFAULT_CARD_WORKSPACES = "/opt/data/kanban/workspaces/"       # where a card scratch workspace lives, as the agent's container sees it
 
 INSTRUCTIONS = (
     "You are coding in the project folder {path} (project \"{name}\"). Treat that folder as your working directory: run commands there, "
@@ -49,6 +54,27 @@ def mount_code(app, cfg, hermes, current, same_origin, owners) -> None:
     base = cfg.code_url.rstrip("/")
     headers = {"X-Code-Token": cfg.code_token}
     router = APIRouter()
+    store_path = cfg.data_dir / "code_sessions.json"
+    card_workspaces = (cfg.kanban_workspaces_dir or DEFAULT_CARD_WORKSPACES).rstrip("/") + "/"
+    store_lock = threading.Lock()
+
+    def load_store() -> dict:
+        """Which project each coding session belongs to, and which kanban card each project is linked to."""
+        try:
+            d = json.loads(store_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            d = {}
+        d = d if isinstance(d, dict) else {}
+        if not isinstance(d.get("sessions"), dict):
+            d["sessions"] = {}
+        if not isinstance(d.get("links"), dict):
+            d["links"] = {}
+        return d
+
+    def save_store(d: dict) -> None:
+        tmp = store_path.with_name(store_path.name + ".tmp")
+        tmp.write_text(json.dumps(d, indent=1, sort_keys=True), encoding="utf-8")
+        tmp.replace(store_path)
 
     async def guard(request: Request):
         who = current(request)
@@ -154,6 +180,11 @@ def mount_code(app, cfg, hermes, current, same_origin, owners) -> None:
         if not owners.claim(sid, who["user"]):
             raise HTTPException(status_code=403, detail="That session belongs to someone else.")
         await upstream("GET", "/git/status", params={"project": name})          # the project must exist
+        with store_lock:                                                          # remember which project this session belongs to
+            d = load_store()
+            if d["sessions"].get(sid) != name:
+                d["sessions"][sid] = name
+                save_store(d)
         cp = await upstream("POST", "/git/checkpoint", body={"project": name, "label": text[:40]})
         import chat_backend
         payload = {"input": text, "session_id": sid, "instructions": INSTRUCTIONS.format(path="/workspace/" + name, name=name)}
@@ -166,7 +197,7 @@ def mount_code(app, cfg, hermes, current, same_origin, owners) -> None:
 
     @router.get("/messages")
     async def messages(session_id: str, request: Request):
-        if not SESSION.fullmatch(session_id):
+        if not (SESSION.fullmatch(session_id) or RELATED.fullmatch(session_id)):
             raise HTTPException(status_code=400, detail="Bad session.")
         status, data = await hermes.dash_call("GET", "/api/sessions/" + session_id + "/messages", None, timeout=20)
         if status != 200:
@@ -188,14 +219,71 @@ def mount_code(app, cfg, hermes, current, same_origin, owners) -> None:
                                         "arguments": str((c.get("function") or {}).get("arguments") or "")[:6000]} for c in calls if isinstance(c, dict)] if isinstance(calls, list) else []})
         return {"messages": out}
 
+    async def list_sessions(source: str) -> list[dict]:
+        """Every session of one kind, newest first. Hermes caps a page at 100 and also keeps an empty scheduled check-in session every 15 minutes,
+        so asking for the newest 80 of everything (as this page once did) lost anything older than about a day."""
+        out: list[dict] = []
+        for page in range(8):
+            status, data = await hermes.dash_call("GET", "/api/sessions?" + urlencode({"limit": 100, "offset": page * 100, "source": source}), None, timeout=20)
+            if status != 200 or not isinstance(data, dict):
+                break
+            got = [s for s in data.get("sessions", []) if isinstance(s, dict) and s.get("source", source) == source]
+            out += got
+            if len(data.get("sessions", [])) < 100:
+                break
+        return out
+
+    def newest(s: dict) -> float:
+        try:
+            return float(s.get("last_active") or s.get("started_at") or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
     @router.get("/sessions")
     async def sessions(request: Request):
-        """The coding sessions: chats whose id starts with the coding prefix, newest first."""
-        status, data = await hermes.dash_call("GET", "/api/sessions?limit=80", None, timeout=20)
-        ss = data.get("sessions", []) if status == 200 and isinstance(data, dict) else []
-        mine = [{"id": s.get("id"), "title": str(s.get("title") or s.get("preview") or "Coding session")[:80], "messages": s.get("message_count", 0), "last_active": s.get("last_active")}
-                for s in ss if isinstance(s, dict) and SESSION.fullmatch(str(s.get("id") or ""))]
-        return {"sessions": mine[:30]}
+        """The coding sessions of one project (and any older ones that were never tied to a project), newest first, plus that project's related
+        work: the worker runs and subagents of the kanban card it is linked to (read-only)."""
+        project = str(request.query_params.get("project") or "")
+        if project and not NAME_RE.fullmatch(project):
+            raise HTTPException(status_code=400, detail="Bad project.")
+        store = load_store()
+        coding = [s for s in await list_sessions("api_server") if SESSION.fullmatch(str(s.get("id") or ""))]
+        mine = []
+        for s in sorted(coding, key=newest, reverse=True):
+            owner = store["sessions"].get(s.get("id"))
+            if project and owner and owner != project:
+                continue
+            mine.append({"id": s.get("id"), "title": str(s.get("title") or s.get("preview") or "Coding session")[:80], "messages": s.get("message_count", 0),
+                         "last_active": s.get("last_active"), "legacy": not owner})
+        link = store["links"].get(project) if project else None
+        related = []
+        if isinstance(link, dict) and CARD.fullmatch(str(link.get("card") or "")):
+            where = card_workspaces + link["card"]
+            found = []
+            for source in ("kanban", "subagent"):
+                found += [s for s in await list_sessions(source) if str(s.get("cwd") or "") == where and int(s.get("message_count") or 0) > 0]
+            for s in sorted(found, key=newest, reverse=True):
+                title = str(s.get("title") or "")[:80] if s.get("source") == "subagent" else "Worker run" + (" - " + str(link.get("title"))[:50] if link.get("title") else "")
+                related.append({"id": s.get("id"), "title": title, "kind": s.get("source"), "messages": s.get("message_count", 0), "last_active": s.get("last_active")})
+        return {"sessions": mine[:30], "related": related[:40], "link": link if isinstance(link, dict) else None}
+
+    @router.put("/links")
+    async def set_link(request: Request):
+        """Link a project to a kanban card (its worker runs then appear under the project as related work), or unlink with card: null."""
+        body = await request.json()
+        name, card = str(body.get("project") or ""), body.get("card")
+        if not NAME_RE.fullmatch(name):
+            raise HTTPException(status_code=400, detail="Pick a project first.")
+        if card is not None and not (isinstance(card, str) and CARD.fullmatch(card)):
+            raise HTTPException(status_code=400, detail="That is not a card id (for example t_032dcd3a).")
+        with store_lock:
+            d = load_store()
+            if card is None:
+                d["links"].pop(name, None)
+            else:
+                d["links"][name] = {"card": card, "title": str(body.get("title") or "")[:120]}
+            save_store(d)
+        return {"ok": True}
 
     app.include_router(router, prefix=PREFIX, dependencies=[Depends(guard)])
 
@@ -229,10 +317,20 @@ def mount_code(app, cfg, hermes, current, same_origin, owners) -> None:
                         elif m.get("text") is not None:
                             await up.send(m["text"])
 
-                tasks = [asyncio.create_task(down()), asyncio.create_task(forward())]
-                await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
-                for t in tasks:
-                    t.cancel()
+                async def watch_access():
+                    while True:
+                        await asyncio.sleep(5)
+                        person = await asyncio.to_thread(current, ws)
+                        if not person or not cfg.allows(person["role"], "admin"):
+                            return
+
+                tasks = [asyncio.create_task(down()), asyncio.create_task(forward()), asyncio.create_task(watch_access())]
+                try:
+                    await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+                finally:
+                    for task in tasks:
+                        task.cancel()
+                    await asyncio.gather(*tasks, return_exceptions=True)
         except Exception:
             pass
         finally:

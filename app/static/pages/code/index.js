@@ -222,6 +222,7 @@
     var pr = useState([]), projects = pr[0], setProjects = pr[1];
     var cur = useState(pref("project", "")), project = cur[0], setProject = cur[1];
     var ss = useState([]), sessions = ss[0], setSessions = ss[1];
+    var rl = useState([]), related = rl[0], setRelated = rl[1], ro_ = useState(false), readOnly = ro_[0], setReadOnly = ro_[1];   // a linked card's worker runs, shown read-only
     var sid = useState(""), session = sid[0], setSession = sid[1];
     var it = useState([]), items = it[0], setItems = it[1];
     var tx = useState(""), text = tx[0], setText = tx[1];
@@ -247,13 +248,13 @@
     var mo = useState(false), menuOff = mo[0], setMenuOff = mo[1];                // Esc hides the menu until the text changes
     var nt = useState(""), note = nt[0], setNote = nt[1];                         // what a command printed (help, status)
     var boxRef = useRef(null);
-    var logRef = useRef(null), modeRef = useRef(mode), liveRef = useRef(null), sessionRef = useRef("");
-    modeRef.current = mode; liveRef.current = live; sessionRef.current = session;
+    var logRef = useRef(null), modeRef = useRef(mode), liveRef = useRef(null), sessionRef = useRef(""), projectRef = useRef(project);
+    modeRef.current = mode; liveRef.current = live; sessionRef.current = session; projectRef.current = project;
     var running = !!(live && !TERMINAL[live.status]);
 
     useEffect(function () { fetchJSON(CODE + "/status").then(setSetup, function (e) { setSetup({ configured: false, up: false, error: errText(e) }); }); }, []);
     function loadProjects() { return fetchJSON(CODE + "/projects").then(function (r) { setProjects(r.projects || []); return r.projects || []; }, function (e) { setErr(errText(e)); return []; }); }
-    function loadSessions() { fetchJSON(CODE + "/sessions").then(function (r) { setSessions(r.sessions || []); }, function () { /* optional */ }); }
+    function loadSessions(p) { fetchJSON(CODE + "/sessions" + (p ? "?" + q({ project: p }) : "")).then(function (r) { setSessions(r.sessions || []); setRelated(r.related || []); }, function () { /* optional */ }); }
     useEffect(function () {
       if (!(setup && setup.configured && setup.up)) return;
       loadProjects().then(function (ps) {
@@ -261,8 +262,8 @@
         // a first visit: make a scratch project so the files, changes and terminal work straight away
         post(CODE + "/projects", { name: "scratch" }).then(function () { return loadProjects(); }).then(function () { setProject("scratch"); }, function (e) { setErr(errText(e)); });
       });
-      loadSessions();
     }, [setup]);
+    useEffect(function () { if (setup && setup.configured && setup.up) loadSessions(project); }, [project, setup]);
     useEffect(function () { if (project) setPref("project", project); }, [project]);
 
     function loadGit() {
@@ -275,11 +276,11 @@
     useEffect(function () { loadGit(); }, [project, compare, stamp]);
     useEffect(function () { setAtts([]); }, [project]);
     useEffect(function () { setFiles([]); if (project) fetchJSON(CODE + "/files?" + q({ project: project })).then(function (r) { setFiles(r.files || []); }, function () { /* mentions are optional */ }); }, [project, stamp]);
-    useEffect(function () { setItems([]); setSession(""); setLive(null); setFile(""); setCompare(""); }, [project]);
+    useEffect(function () { setItems([]); setSession(""); setLive(null); setFile(""); setCompare(""); setReadOnly(false); }, [project]);
     useEffect(function () { var el = logRef.current; if (el) el.scrollTop = el.scrollHeight; }, [items.length, live && live.text, live && live.controls && live.controls.length]);
 
     function loadMessages(id) { return fetchJSON(CODE + "/messages?" + q({ session_id: id })).then(function (r) { setItems(build(r.messages || [])); }, function () { /* the first message may not be stored yet */ }); }
-    function openSession(id) { setSession(id); setLive(null); loadMessages(id); }
+    function openSession(id, ro) { setSession(id); setLive(null); setReadOnly(!!ro); loadMessages(id); }
 
     /* follow a run: stream the answer text, poll the stored messages (tool calls and results) and the approvals */
     function follow(runId, id) {
@@ -314,7 +315,7 @@
           if (TERMINAL[r.status]) {
             alive = false; if (ctl) ctl.abort();
             loadMessages(id).then(function () { setLive(function (c) { return c && c.id === runId ? Object.assign({}, c, { text: "" }) : c; }); });
-            setStamp(function (n) { return n + 1; }); loadSessions(); loadProjects();
+            setStamp(function (n) { return n + 1; }); loadSessions(projectRef.current); loadProjects();
             return;
           }
           timer = setTimeout(tick, 1400);
@@ -414,7 +415,7 @@
     }
     function decide(c, choice) { post(CHAT + "/runs/" + live.id + "/approval", { request_id: c.request_id || c.prompt_id || c.id, execution_generation: live.gen, choice: choice }).catch(function (e) { setErr(errText(e)); }); }
     function stop() { if (live) fetchJSON(CHAT + "/runs/" + live.id + "/stop", { method: "POST" }).catch(function () { /* over already */ }); }
-    function newSession() { setSession(""); setItems([]); setLive(null); }
+    function newSession() { setSession(""); setItems([]); setLive(null); setReadOnly(false); }
     function create() {
       post(CODE + "/projects", { name: newName.trim(), git_url: newGit.trim() || undefined }).then(function () { setCreating(false); var n = newName.trim(); setNewName(""); setNewGit(""); loadProjects().then(function () { setProject(n); }); }, function (e) { setErr(errText(e)); });
     }
@@ -439,7 +440,7 @@
       h("button", { type: "button", role: "tab", "aria-selected": view === "chat" ? "true" : "false", className: "cd-view" + (view === "chat" ? " cd-on" : ""), onClick: function () { pickView("chat"); } }, "Chat"),
       window.__APP_PIPELINE__ ? h("button", { type: "button", role: "tab", "aria-selected": view === "pipeline" ? "true" : "false", className: "cd-view" + (view === "pipeline" ? " cd-on" : ""), onClick: function () { pickView("pipeline"); } }, "Pipeline") : null);
     if (view === "pipeline" && window.__APP_PIPELINE__) {
-      return h("div", { className: "cd-page" }, viewSwitch, h(window.__APP_PIPELINE__, { mode: mode, onProjects: loadProjects,
+      return h("div", { className: "cd-page" }, viewSwitch, h(window.__APP_PIPELINE__, { mode: mode, onProjects: loadProjects, project: project, projects: projects.map(function (p) { return p.name; }), onPick: function (n) { setProject(n); setPref("project", n); },
         onChat: function (name, firstText) { setProject(name); setPref("project", name); setText(firstText || ""); pickView("chat"); } }));
     }
     return h("div", { className: "cd-page" }, viewSwitch,
@@ -456,7 +457,12 @@
           h("button", { type: "button", className: "cd-btn cd-primary", disabled: !project, onClick: newSession }, "+ New session"),
           h("div", { className: "cd-sessions" }, sessions.length ? sessions.map(function (s) {
             return h("button", { key: s.id, type: "button", className: "cd-session" + (s.id === session ? " cd-on" : ""), onClick: function () { openSession(s.id); } }, h("span", null, s.title), h("small", null, s.messages + " msgs" + (s.last_active ? " · " + ago(s.last_active) : "")));
-          }) : h("p", { className: "cd-muted" }, "No sessions yet."))),
+          }) : h("p", { className: "cd-muted" }, "No sessions yet.")),
+          related.length ? h("div", { className: "cd-label", style: { marginTop: "14px" } }, "Related work") : null,
+          related.length ? h("p", { className: "cd-muted", style: { margin: "0 0 6px" } }, "Worker runs of the linked kanban card. Read only.") : null,
+          related.length ? h("div", { className: "cd-sessions" }, related.map(function (s) {
+            return h("button", { key: s.id, type: "button", className: "cd-session" + (s.id === session ? " cd-on" : ""), onClick: function () { openSession(s.id, true); } }, h("span", null, s.title), h("small", null, s.messages + " msgs" + (s.last_active ? " · " + ago(s.last_active) : "")));
+          })) : null),
         h("section", { className: "cd-main", "aria-label": "Conversation" },
           h("div", { className: "cd-bar" },
             h("strong", null, project || "No project"), gstat && gstat.git ? h("span", { className: "cd-chip" }, "⎇ " + (gstat.branch === "HEAD" ? "no commits yet" : gstat.branch)) : null,
@@ -464,6 +470,7 @@
             h("span", { style: { flex: 1 } }),
             h("label", { className: "cd-mode", title: "Ask: you approve each risky step. Auto: everything is approved for you." }, "Permissions ",
               h("select", { className: "cd-select", value: mode, "aria-label": "Permission mode", onChange: function (e) { pickMode(e.target.value); } }, h("option", { value: "ask" }, "Ask me"), h("option", { value: "auto" }, "Approve everything")))),
+          readOnly ? h("div", { className: "cd-cmdnote", role: "status" }, "Read only: this is one of " + agent + "'s worker sessions on the linked card. Start a new session to give her something to do here.") : null,
           h("div", { className: "cd-log", ref: logRef, role: "log", "aria-live": "polite" },
             rows.length || live ? [rows,
               live && live.text ? h("div", { key: "live", className: "cd-msg cd-assistant" }, h("div", { className: "cd-who" }, agent), h("div", { className: "cd-text" }, live.text)) : null,
@@ -482,10 +489,10 @@
               return h("button", { key: it.key, type: "button", role: "option", "aria-selected": i === menuSel ? "true" : "false", className: "cd-menu-item" + (i === menuSel ? " cd-on" : ""),
                 onMouseDown: function (e) { e.preventDefault(); }, onClick: function () { pick(it, false); } }, h("span", { className: "cd-menu-label" }, it.label), it.hint ? h("span", { className: "cd-menu-hint" }, it.hint) : null);
             })) : null,
-            h("textarea", { className: "cd-text-in", ref: boxRef, rows: 3, maxLength: 12000, "aria-label": "Message", "aria-controls": menu.length ? "cd-menu" : undefined, disabled: !project,
+            h("textarea", { className: "cd-text-in", ref: boxRef, rows: 3, maxLength: 12000, "aria-label": "Message", "aria-controls": menu.length ? "cd-menu" : undefined, disabled: !project || readOnly,
               placeholder: project ? "Message " + agent + " about " + project + "…  (Enter to send, / for commands, @ for files)" : "Create or pick a project first", value: text,
               onChange: typed, onPaste: pastedFiles, onKeyDown: boxKey, onKeyUp: function (e) { if (e.target.selectionStart !== caret) setCaret(e.target.selectionStart); }, onClick: function (e) { setCaret(e.target.selectionStart); } }),
-            h("div", { className: "cd-compose-btns" }, h("input", { type: "file", multiple: true, ref: fileIn, className: "cd-file-in", tabIndex: -1, "aria-hidden": "true", onChange: function (e) { addFiles(e.target.files); e.target.value = ""; } }), h("button", { type: "button", className: "cd-btn", disabled: !project, title: "Attach files (or drop or paste them here)", "aria-label": "Attach files", onClick: function () { if (fileIn.current) fileIn.current.click(); } }, "📎 Attach"), h("button", { type: "button", className: "cd-btn cd-primary", disabled: !project || uploading || (!text.trim() && !atts.length) || (running && !C.parseCommand(text.trim())), onClick: send }, running ? "Working…" : "Send"), running ? h("button", { type: "button", className: "cd-btn", onClick: stop }, "Stop") : null))),
+            h("div", { className: "cd-compose-btns" }, h("input", { type: "file", multiple: true, ref: fileIn, className: "cd-file-in", tabIndex: -1, "aria-hidden": "true", onChange: function (e) { addFiles(e.target.files); e.target.value = ""; } }), h("button", { type: "button", className: "cd-btn", disabled: !project, title: "Attach files (or drop or paste them here)", "aria-label": "Attach files", onClick: function () { if (fileIn.current) fileIn.current.click(); } }, "📎 Attach"), h("button", { type: "button", className: "cd-btn cd-primary", disabled: !project || readOnly || uploading || (!text.trim() && !atts.length) || (running && !C.parseCommand(text.trim())), onClick: send }, running ? "Working…" : "Send"), running ? h("button", { type: "button", className: "cd-btn", onClick: stop }, "Stop") : null))),
         h("aside", { className: "cd-right", "aria-label": "Project tools" },
           h("div", { className: "cd-tabs", role: "tablist" }, tabBtn("files", "Files"), tabBtn("changes", "Changes" + (changes ? " (" + changes + ")" : "")), tabBtn("terminal", "Terminal"), tabBtn("browser", "Browser")),
           !project && tab !== "browser" ? h("div", { className: "cd-pane" }, h("p", { className: "cd-muted" }, "Pick or create a project on the left first. The files, changes and terminal belong to a project.")) : null,

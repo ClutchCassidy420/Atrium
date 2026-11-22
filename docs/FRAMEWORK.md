@@ -56,6 +56,16 @@ Files and Calendar use WebDAV and CalDAV on a Nextcloud with an app password. An
 
 A downstream install can add routes of its own to `/api/mail` (for example a server-wide block list) and list them in `mail_backend.FEATURES`; the page shows the matching controls (`"blocklist"` turns on the Spam block menu).
 
+### Agentic coding: projects, sessions, the idea pipeline and the shared browser
+
+Coding sessions belong to the project they were started in; older sessions that were never tied to a project show in every project. A project can be linked to a kanban card (`PUT /api/code/links`), and that card's worker runs and subagents then appear under the project as read-only related work (the server never continues them; sending from one starts a fresh session). Set `HERMES_KANBAN_WORKSPACES` if the agent's container keeps card workspaces somewhere other than `/opt/data/kanban/workspaces`.
+
+Every idea in the pipeline belongs to a project. In the default project (`idea-pipeline`, the incubator) a build gets a coding project of its own. In any other project the idea is built inside it, and only after a restore point was saved: if the restore point fails, the build does not start. Advancing a stage is safe to retry: a retry adopts the stage's card and the build project an interrupted attempt already made, and "Approve everything" shows on the idea why it stopped instead of stalling silently.
+
+Restore points in the sidecar get unique names, and a rewind is checked against the checkpoint's contents before it reports success (a checkpoint of the present is kept, so a rewind can be undone). The terminal closes within a few seconds if the person's owner access is withdrawn.
+
+The agent's shared browser has no open debugging port. The sidecar publishes `GET /json/version` and the `/devtools/browser/<id>` WebSocket on its private port 9000, and both require the `X-CDP-Token` header to equal the sidecar's `CDP_TOKEN`; with `CDP_TOKEN` unset the entry point is closed. The agent's CDP client must be able to send that header. Check this before upgrading an install whose agent connected to the old port 9222.
+
 ## The built-in pages
 
 - **Home** (`/`): the agent and the work on one screen. A greeting, an overall health ring (for roles that may see infrastructure), a single "Needs you" list (failed jobs, blocked cards, services down, backups, security), today's focus,
