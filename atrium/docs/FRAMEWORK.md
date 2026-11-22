@@ -46,6 +46,16 @@ Core pages are in `app/pages.json`; an install adds its own in `INSTANCE_DIR/pag
 Paths and asset locations are validated; reserved paths cannot be used.
 Optional fields: `group` and `subgroup` place the page in a sidebar section and folder, `order` sorts it, `aliases` are old addresses that redirect to it, and `"nav": "gear"` takes the page out of the sidebar list and reaches it from the gear icon at the bottom of the sidebar instead (Settings uses it; that page also holds the Sign out button). A user who cannot open the gear page keeps a Sign out button in the sidebar.
 
+`"requires": "mail"` or `"requires": "nextcloud"` lists the page, and serves it, only when that service is configured (the Email pages need `MAIL_*`; Files and Calendar need `NEXTCLOUD_*`; see `config.private.example`). Their routes (`/api/mail`, `/api/nextcloud`) are mounted under the same rule, always behind the owner permission.
+
+### Email, Files and Calendar
+
+Email talks IMAP and SMTP to one mailbox and always verifies the server certificate (implicit TLS only; there is no setting to turn that off). If you reach the server by an address that is not on its certificate, set `MAIL_IMAP_TLS_SERVER_NAME` and `MAIL_SMTP_TLS_SERVER_NAME`. Moving and deleting act on the chosen message only, a message is never cut short (one over 64 MB is refused with a clear error), and every Send carries a one-time `submission_id`, so retrying a send never delivers it twice.
+
+Files and Calendar use WebDAV and CalDAV on a Nextcloud with an app password. An upload never replaces a file of the same name unless the request says `replace=1`; Nextcloud keeps the old version.
+
+A downstream install can add routes of its own to `/api/mail` (for example a server-wide block list) and list them in `mail_backend.FEATURES`; the page shows the matching controls (`"blocklist"` turns on the Spam block menu).
+
 ## The built-in pages
 
 - **Home** (`/`): the agent and the work on one screen. A greeting, an overall health ring (for roles that may see infrastructure), a single "Needs you" list (failed jobs, blocked cards, services down, backups, security), today's focus,

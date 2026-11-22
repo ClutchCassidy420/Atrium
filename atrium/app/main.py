@@ -50,7 +50,9 @@ def make_app(cfg: configmod.Config | None = None, hermes: Hermes | None = None, 
     sessions = Sessions(cfg.data_dir / "sessions.json")
     overview = Overview(hermes, cfg.hermes_data_dir, cfg.deck_dir, cfg.systems)
     throttle = Throttle(cfg.max_fails, cfg.lock_minutes * 60)
-    pages = load_pages(HERE / "pages.json", cfg.instance_dir, cfg.pages_disabled)
+    configured = {"mail": bool(cfg.mail_address and cfg.mail_token and cfg.mail_imap_host),
+                  "nextcloud": bool(cfg.nextcloud_url and cfg.nextcloud_user and cfg.nextcloud_password)}
+    pages = [p for p in load_pages(HERE / "pages.json", cfg.instance_dir, cfg.pages_disabled) if not p["requires"] or configured[p["requires"]]]
     instance_static = (cfg.instance_dir / "static").resolve()
     theme_file = cfg.instance_dir / "theme.css"
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
