@@ -121,6 +121,8 @@ def mount_chat(app, cfg, hermes, current, same_origin) -> ChatOwners:
             raise HTTPException(status_code=403, detail="Bad origin.")
         if request.method == "POST" and any(rel == p or rel.startswith(p) for p in ADMIN_WRITES) and not is_admin(who):
             raise HTTPException(status_code=403, detail="Only owners can change that.")
+        if cfg.action_gate_url and (rel == "/actions" or rel.startswith("/actions/")) and not is_admin(who):
+            raise HTTPException(status_code=403, detail="Only owners can view approval records.")
         if any(rel == p or rel.startswith(p + "/") or rel.startswith(p + "?") for p in ADMIN_ANY) and not is_admin(who):
             raise HTTPException(status_code=403, detail="Only owners can use that.")
         if request.method == "POST" and rel == "/send":
@@ -134,15 +136,19 @@ def mount_chat(app, cfg, hermes, current, same_origin) -> ChatOwners:
                     status, _ = await hermes.dash_call("GET", "/api/sessions/" + sid)
                     if status == 200:                              # an older chat nobody has claimed: owners only
                         raise HTTPException(status_code=403, detail="That chat belongs to someone else.")
+                    if status != 404:
+                        raise HTTPException(status_code=503, detail="Chat ownership could not be verified.")
                 if not owners.claim(sid, who["user"]) and not is_admin(who):
                     raise HTTPException(status_code=403, detail="That chat belongs to someone else.")
         m = re.match(r"^/(?:runs|stream)/([A-Za-z0-9_\-]{1,100})", rel)
-        if m:
+        if m and not is_admin(who):
             status, run = await hermes.api_call("GET", "/v1/runs/" + m.group(1))
-            if status == 200 and isinstance(run, dict):
-                sid = run.get("session_id") or ""
-                if not await may_use_session(who, sid):
-                    raise HTTPException(status_code=403, detail="That run belongs to someone else.")
+            if status == 404:
+                raise HTTPException(status_code=404, detail="Run not found.")
+            if status != 200 or not isinstance(run, dict):
+                raise HTTPException(status_code=503, detail="Run ownership could not be verified.")
+            if not await may_use_session(who, run.get("session_id") or ""):
+                raise HTTPException(status_code=403, detail="That run belongs to someone else.")
         request.state.who = who
 
     router = APIRouter()

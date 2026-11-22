@@ -147,8 +147,7 @@
     /* ---- recently updated (with Roll back) ---- */
     var recent = [];
     if (cd) Object.keys(cd.restore_points || {}).forEach(function (proj) {
-      var p = (cd.projects || []).filter(function (x) { return x.project === proj; })[0];
-      if (p) recent.push({ key: "rb:" + proj, project: proj, created: cd.restore_points[proj].created });
+      recent.push({ key: "rb:" + proj, project: proj, created: cd.restore_points[proj].created });
     });
     recent.sort(function (a, b) { return b.created - a.created; });
 

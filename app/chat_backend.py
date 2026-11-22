@@ -369,7 +369,8 @@ def _check_zip(path: Path) -> None:
 
 def _extract(path: Path, ext: str) -> dict:
     """Return {"kind", "pages", "preview"}; raises ValueError with a plain message when the file is not usable."""
-    head = path.read_bytes()[:8] if path.stat().st_size else b""
+    with path.open("rb") as source:
+        head = source.read(8)
     if ext == ".pdf":
         if not head.startswith(b"%PDF"):
             raise ValueError("That does not look like a real PDF.")

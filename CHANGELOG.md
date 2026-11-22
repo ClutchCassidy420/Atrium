@@ -29,6 +29,11 @@
 - **Avatar**: the Live agent character reacts to what happens (work, approval, done, failures with escalating frustration, welcome back); the icon of the
   tool the agent is really using glows on the 3D whiteboard and around the drawn avatar (`/api/tool-activity`, owners only, names and times only); installs
   can add their own looks with `[[avatar_presets]]` in `instance.toml` (validated). Tests: `tests/avatar.test.js`, `tests/test_tool_activity.py`.
+- **Security fixes from the audit**: a sign-in ends when its password changes (also from the command-line tool), the sessions file is locked and safe against a
+  damaged file; chat and run ownership fail closed; approval records are for owners only; the upload type check reads only the first bytes; the PDF, Word, Excel and
+  PowerPoint readers are now installed by the requirements (they were imported but missing); the host updater no longer calls a failed package refresh "nothing waiting",
+  keeps restore points until the previous version is verified, and can roll back a group that is down. Tests: `tests/test_audit_fixes.py` plus new cases in
+  `tests/test_auth.py` and `tests/test_hostctl_daemon.py`.
 
 ## 1.0.1 (license change)
 
