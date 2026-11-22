@@ -55,6 +55,12 @@ def mount_owner_pages(app, cfg, hermes, current, same_origin) -> None:
     overview.HOST_ACTIONS = bool(cfg.host_action_url and cfg.host_action_key)
     app.include_router(hostctl_backend.router, prefix="/api/host", dependencies=[Depends(guard)])
     app.include_router(kanban_backend.router, prefix="/api/kanban", dependencies=[Depends(guard)])
+    import nextcloud_backend
+    if nextcloud_backend.configure(cfg):                 # Files and Calendar exist only when a Nextcloud is configured
+        app.include_router(nextcloud_backend.router, prefix="/api/nextcloud", dependencies=[Depends(guard)])
+    import mail_backend
+    if mail_backend.configure(cfg):                     # Email exists only when a mailbox is configured
+        app.include_router(mail_backend.router, prefix="/api/mail", dependencies=[Depends(guard)])
     pipeline_backend.configure(cfg, hermes, app)
     app.include_router(pipeline_backend.router, prefix="/api/pipeline", dependencies=[Depends(guard)])
 

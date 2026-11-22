@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- **Email, Files and Calendar** (optional, owner only). Pages and routes appear only when `MAIL_*` or `NEXTCLOUD_*` settings exist (new page field `requires`).
+  Mail connections are always verified (IMAP and SMTP implicit TLS); move and delete act on one message by UID; large messages are never truncated;
+  sends are idempotent (`submission_id`) and report success once the server accepted the message even if saving to Sent fails. Uploads never replace
+  an existing file unless asked. Synthetic tests: `tests/test_mail.py`, `tests/test_nextcloud.py`.
+
 ## 1.0.1 (license change)
 
 Atrium is now licensed under the **GNU Affero General Public License v3.0** (AGPL-3.0) instead of the MIT License.
