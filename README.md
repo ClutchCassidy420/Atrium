@@ -1,3 +1,7 @@
+# Atrium
+
+Start the integrated Linux source build with `./atrium/start`. See the [installation and runtime guide](atrium/FOUNDATION.md) for prerequisites, owner setup and service configuration.
+
 <p align="center">
   <img src="assets/banner.png" alt="Hermes Agent" width="100%">
 </p>

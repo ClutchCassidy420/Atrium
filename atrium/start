@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Install and launch Atrium for the current Linux user.
+set -euo pipefail
+umask 077
+root=$(cd "$(dirname "$0")/.." && pwd)
+state=${ATRIUM_STATE_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/atrium}
+state=$(realpath -m -- "$state")
+case "$state/" in
+    "$root/"*) echo "Choose an Atrium state directory outside the source checkout." >&2; exit 1 ;;
+esac
+mkdir -p -- "$state"
+state=$(cd -- "$state" && pwd -P)
+if [[ ! -O $state || $(stat -c %a "$state") != 700 ]]; then
+    echo "Atrium needs a private state directory owned by your account (0700)." >&2
+    exit 1
+fi
+command -v uv >/dev/null || { echo "Install uv and rerun atrium/start." >&2; exit 1; }
+exec 9>"$state/start.lock"
+flock -n 9 || { echo "Atrium is already starting or running in this profile." >&2; exit 1; }
+export ATRIUM_STATE_DIR="$state"
+export ATRIUM_RUNTIME_PYTHON="$state/runtime-env/bin/python"
+export ATRIUM_WEB_PYTHON="$state/web-env/bin/python"
+UV_PROJECT_ENVIRONMENT="$state/runtime-env" uv sync --project "$root" --python 3.14 --frozen --no-dev --extra web --extra mcp --extra sms
+if [[ ! -x $ATRIUM_WEB_PYTHON ]]; then
+    uv venv --python 3.14 "$state/web-env"
+fi
+uv pip install --python "$ATRIUM_WEB_PYTHON" -r "$root/atrium/requirements.txt"
+mkdir -p "$state/web-data"
+if [[ ! -f "$state/web-data/users.json" ]]; then
+    "$ATRIUM_WEB_PYTHON" "$root/atrium/scripts/manage_users.py" "$state/web-data" add owner owner
+fi
+for key in gateway dashboard; do
+    if [[ ! -s "$state/$key.key" ]]; then
+        "$ATRIUM_WEB_PYTHON" -c 'import secrets; print(secrets.token_hex(32))' >"$state/$key.key.new"
+        mv -- "$state/$key.key.new" "$state/$key.key"
+    fi
+done
+export API_SERVER_KEY="$(<"$state/gateway.key")"
+export HERMES_DASHBOARD_SESSION_TOKEN="$(<"$state/dashboard.key")"
+exec "$root/atrium/dev-stack.sh"
