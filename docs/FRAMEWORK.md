@@ -16,7 +16,7 @@ person, a company or a host.
 ## Settings, in three layers (a later one wins)
 
 1. Built-in defaults (generic).
-2. `INSTANCE_DIR/instance.toml`: `brand`, `agent_name`, `trusted_proxies`, `pages_disabled`, `bootstrap_user`, `[login]`, `[roles]`, `[redirects]` (old address = current address, so links in old notifications and bookmarks still land on the right page).
+2. `INSTANCE_DIR/instance.toml`: `brand`, `agent_name`, `trusted_proxies`, `pages_disabled`, `accordion_nav`, `bootstrap_user`, `[login]`, `[roles]`, `[redirects]` (old address = current address, so links in old notifications and bookmarks still land on the right page).
 3. Environment: `DATA_DIR`, `INSTANCE_DIR`, `TRUSTED_PROXIES`, `HERMES_API_BASE`, `HERMES_API_KEY`, `HERMES_DASHBOARD_BASE`,
    `HERMES_DASHBOARD_TOKEN`, `HERMES_DATA_DIR`, `OWNER_PASSWORD_HASH` (optional, only to create the first owner).
 
@@ -71,6 +71,10 @@ The agent's shared browser has no open debugging port. The sidecar publishes `GE
 An owner can choose, under Settings > Chat model, which model answers their chats: the install's default, or a model from a cloud provider that is already connected to the agent (`GET /api/plugins/atrium-settings/models` lists only connected cloud providers; local, user-defined and unconnected ones are left out). The choice is saved per person (a file named by a hash of the user name) and applies to their chats, their Home ask box and the cloud notice on uploads. It is sent to Hermes as a locked model (`require_model_lock`), and choosing a cloud model needs an explicit yes because the chat text goes to that provider. Everyone else keeps the install's default; the install-wide engine switch on Home still applies to people who have not chosen. A file that was damaged or edited by hand is ignored, never trusted. Agentic coding runs keep using the install-wide engine.
 
 An install that manages its own local models can set `chat_model.LOCAL_ROUTE` to a function `route(personal) -> dict` that supplies the run fields for its default model (it may raise `HTTPException`, for example 503 while a model server is switching).
+
+### Sidebar
+
+On wide screens a button in the sidebar head collapses it to an icon rail (every entry keeps its name as a hover title and an accessible label); the choice is remembered in the browser. On phones the sidebar is a drawer, as before. Set `accordion_nav = true` in `instance.toml` for accordion sections: only the section holding the current page starts open, opening one section (or folder) closes its siblings, and open sections are not remembered between pages. Without it, sections open and close independently and are remembered, as before. The behaviour is covered by `tests/nav.test.js` (needs `jsdom`: `NODE_PATH=<folder with node_modules> node tests/nav.test.js`).
 
 ### Color themes
 

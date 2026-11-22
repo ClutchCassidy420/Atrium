@@ -435,6 +435,7 @@ def make_app(cfg: configmod.Config | None = None, hermes: Hermes | None = None, 
             return PlainTextResponse("", status_code=401)
         data = {"brand": cfg.brand, "agentName": cfg.agent_name, "user": who["user"], "name": who["name"], "role": who["role"],
                 "navGroups": cfg.nav_groups,
+                "accordionNav": cfg.accordion_nav,
                 "navIcons": cfg.nav_icons,
                 "pwa": ({"manifest": CHAT_PREFIX + "/manifest.webmanifest", "sw": CHAT_PREFIX + "/sw.js", "icon": CHAT_PREFIX + "/icon-192.png"} if cfg.push_enabled else None),
                 "pages": [{k: p[k] for k in ("id", "path", "label", "plugin", "scripts", "styles", "group", "subgroup", "order", "nav", "icon")} for p in allowed_pages(who)]}

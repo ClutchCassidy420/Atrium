@@ -24,6 +24,7 @@ DEFAULT_ROLES = {
 
 @dataclass
 class Config:
+    accordion_nav: bool = False           # sidebar sections behave as an accordion: opening one closes the others, and nothing is remembered
     brand: str = "Atrium"                 # shown in the title and the top bar
     agent_name: str = "Assistant"            # what the pages call the agent
     data_dir: Path = Path("/data")           # the app's own writable folder (users, sessions)
@@ -90,6 +91,7 @@ def load(env: dict | None = None) -> Config:
     f = cfg.instance_dir / "instance.toml"
     if f.is_file():
         data = tomllib.loads(f.read_text(encoding="utf-8"))
+        cfg.accordion_nav = data.get("accordion_nav") is True
         cfg.brand = str(data.get("brand", cfg.brand))
         cfg.agent_name = str(data.get("agent_name", cfg.agent_name))
         cfg.trusted_proxies = [str(x) for x in data.get("trusted_proxies", cfg.trusted_proxies)]
