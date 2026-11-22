@@ -8,6 +8,11 @@ objects). A page is a script run by the shim (static/shim.js); the framework nev
 
 "group" puts the page under a dropdown section in the sidebar (empty = a top-level link); "subgroup" nests it one level deeper, under a
 folder of that name inside the section; "order" sorts within its section.
+
+An install can also add scripts and styles to a page that already exists, without replacing it:
+  { "extend": "settings", "scripts": ["/instance/static/more.js"], "styles": [] }
+The page decides what an added script may do (Settings reads window.__APP_SETTINGS_SECTIONS__). An entry that names a page this install has
+turned off is ignored.
 """
 from __future__ import annotations
 
@@ -69,8 +74,11 @@ def load_pages(core_file: Path, instance_dir: Path, disabled: list[str]) -> list
         data = json.loads(f.read_text(encoding="utf-8"))
         for item in data if isinstance(data, list) else [data]:
             raw.append((item, f.name))
-    pages, seen_ids, seen_paths = [], set(), set()
+    pages, seen_ids, seen_paths, extras = [], set(), set(), []
     for item, src in raw:
+        if isinstance(item, dict) and "extend" in item:
+            extras.append((item, src))
+            continue
         page = _clean(item, src)
         if page["id"] in disabled:
             continue
@@ -80,4 +88,16 @@ def load_pages(core_file: Path, instance_dir: Path, disabled: list[str]) -> list
         seen_ids.add(page["id"])
         seen_paths.update(paths)
         pages.append(page)
+    for item, src in extras:
+        target = next((p for p in pages if p["id"] == str(item.get("extend"))), None)
+        if target is None:
+            if str(item.get("extend")) in disabled:
+                continue
+            raise ValueError("%s: extends page %r, which does not exist" % (src, item.get("extend")))
+        for kind in ("scripts", "styles"):
+            for a in item.get(kind) or []:
+                if ".." in str(a) or not ASSET_RE.match(str(a)):
+                    raise ValueError("%s: bad asset path %r" % (src, a))
+                if a not in target[kind]:
+                    target[kind].append(str(a))
     return pages

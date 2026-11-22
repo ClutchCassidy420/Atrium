@@ -366,3 +366,26 @@ def test_a_server_that_cannot_report_capabilities_again_keeps_the_greeting_ones(
     monkeypatch.setattr(mb, "_VerifiedIMAP4SSL", Quiet)
     with mb._imap() as m:
         assert mb._caps(m) == {"IMAP4REV1", "MOVE"}
+
+
+# ---------------------------------------------------------------- read hooks an install can add
+
+def test_an_install_can_add_fields_to_an_opened_message(monkeypatch, mailcfg):
+    use(monkeypatch, Box(raw=b"From: a@x.com\r\nSubject: hi\r\n\r\nbody"))
+    hook = lambda msg: {"extra": str(msg["Subject"])}
+    mb.READ_HOOKS.append(hook)
+    try:
+        assert mb._read("INBOX", 7)["extra"] == "hi"
+    finally:
+        mb.READ_HOOKS.remove(hook)
+    assert "extra" not in mb._read("INBOX", 7)
+
+
+def test_a_failing_read_hook_never_stops_a_message_from_opening(monkeypatch, mailcfg):
+    use(monkeypatch, Box(raw=b"From: a@x.com\r\nSubject: hi\r\n\r\nbody"))
+    boom = lambda msg: 1 / 0
+    mb.READ_HOOKS.append(boom)
+    try:
+        assert mb._read("INBOX", 7)["subject"] == "hi"
+    finally:
+        mb.READ_HOOKS.remove(boom)

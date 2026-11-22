@@ -44,6 +44,8 @@ and uses `window.__HERMES_PLUGIN_SDK__` (React, hooks, `fetchJSON`). Pages are d
 Core pages are in `app/pages.json`; an install adds its own in `INSTANCE_DIR/pages.d/*.json` with scripts under
 `INSTANCE_DIR/static/` (served at `/instance/static/`). A user only sees and can only open pages their role allows.
 Paths and asset locations are validated; reserved paths cannot be used.
+
+An install can also add scripts and styles to a page that already exists, without replacing it: `{ "extend": "settings", "scripts": ["/instance/static/more.js"] }` in `pages.d`. The page decides what an added script may do. Settings lets a script add a section (or replace a core one) with `window.__APP_SETTINGS_SECTIONS__.push({ id, label, icon, note, parts: [Component], replaces: "model" })`; the mail backend lets an install add fields to an opened message through `mail_backend.READ_HOOKS`; the chat page reads `window.__ATRIUM_UI__` (the avatar script supplies the drawn `Orb`, an install may supply an `AvatarHero`).
 Optional fields: `group` and `subgroup` place the page in a sidebar section and folder, `order` sorts it, `aliases` are old addresses that redirect to it, and `"nav": "gear"` takes the page out of the sidebar list and reaches it from the gear icon at the bottom of the sidebar instead (Settings uses it; that page also holds the Sign out button). A user who cannot open the gear page keeps a Sign out button in the sidebar.
 
 `"requires": "mail"` or `"requires": "nextcloud"` lists the page, and serves it, only when that service is configured (the Email pages need `MAIL_*`; Files and Calendar need `NEXTCLOUD_*`; see `config.private.example`). Their routes (`/api/mail`, `/api/nextcloud`) are mounted under the same rule, always behind the owner permission.
