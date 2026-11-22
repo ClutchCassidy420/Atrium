@@ -23,3 +23,14 @@ For release qualification, connect an approved HTTPS MCP fixture in Settings, te
 ## Updating the lineage
 
 Fetch Hermes changes from the hermes remote and merge a reviewed commit into a candidate branch. For changes from the original frontend repository, fetch the atrium remote and merge with the atrium subtree prefix. Resolve conflicts and repeat the compatibility check before pinning a new release. The original source snapshots used here are shallow. Fetch older history from the corresponding remotes when a review requires it.
+
+## Upgrade and rollback on Linux
+
+Use the checkout that actually runs the current release to record its revision. The checkpoint command requires a stopped profile and a clean checkout. For a release that predates this command, run the newer checkpoint utility with `--release "$current_checkout"` when saving. Checkpoints contain private keys and account data. Use trusted private storage outside Git. Symlinks retain their targets. Back up external dependencies separately, including a custom INSTANCE_DIR, provider environment, external databases and TLS files.
+
+1. Fetch the reviewed candidate revision. Create a separate checkout with `git worktree add --detach "$candidate_checkout" "$candidate_sha"` and exercise it with a disposable profile. Stop the trial before restarting any other local stack on the same ports.
+2. Stop the installed stack. From the **current release checkout**, run `./atrium/checkpoint save "$profile" "$checkpoint"`. The destination must be new and its parent must exist. Keep the current checkout and checkpoint through the rollback window.
+3. Start the candidate with `ATRIUM_STATE_DIR="$profile" "$candidate_checkout/atrium/start"` and the install's usual environment. Verify HTTPS owner login, the selected model and a tool call in a fresh chat.
+4. To roll back, stop the candidate. Run `./atrium/checkpoint restore "$checkpoint" "$recovered_profile"` with a new private profile path. Start the original checkout at the revision in release.json with ATRIUM_STATE_DIR pointing to the recovered profile. Restore any external dependencies and confirm referenced paths still resolve. New writes made after the checkpoint remain in the candidate's profile. Keep it for reconciliation.
+
+The launcher provisions its virtual environments on first use of a restored profile. Keep the pinned source and dependency cache available if rollback needs to work offline.
