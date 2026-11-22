@@ -9,6 +9,8 @@ the framework's repository. See docs/FRAMEWORK.md.
 """
 from __future__ import annotations
 
+import re
+
 import json
 import os
 import tomllib
@@ -22,8 +24,29 @@ DEFAULT_ROLES = {
 }
 
 
+def clean_presets(raw) -> list:
+    """The look presets from instance.toml, or [] when they are not in the expected shape (a name and a small map of plain values)."""
+    if not isinstance(raw, list) or not 0 < len(raw) <= 40:
+        return []
+    out = []
+    for item in raw:
+        if not isinstance(item, dict) or set(item) - {"name", "look"} or not isinstance(item.get("name"), str) or not 0 < len(item["name"].strip()) <= 40:
+            return []
+        look = item.get("look")
+        if not isinstance(look, dict) or not look or len(look) > 24:
+            return []
+        for k, v in look.items():
+            if not isinstance(k, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,31}", k):
+                return []
+            if not (isinstance(v, bool) or (isinstance(v, (int, float)) and abs(v) < 1e6) or (isinstance(v, str) and len(v) <= 40)):
+                return []
+        out.append({"name": item["name"].strip(), "look": dict(look)})
+    return out
+
+
 @dataclass
 class Config:
+    avatar_presets: list = field(default_factory=list)       # extra looks for Settings > Avatar: [{"name": ..., "look": {...}}] from instance.toml
     accordion_nav: bool = False           # sidebar sections behave as an accordion: opening one closes the others, and nothing is remembered
     brand: str = "Atrium"                 # shown in the title and the top bar
     agent_name: str = "Assistant"            # what the pages call the agent
@@ -92,6 +115,7 @@ def load(env: dict | None = None) -> Config:
     if f.is_file():
         data = tomllib.loads(f.read_text(encoding="utf-8"))
         cfg.accordion_nav = data.get("accordion_nav") is True
+        cfg.avatar_presets = clean_presets(data.get("avatar_presets"))
         cfg.brand = str(data.get("brand", cfg.brand))
         cfg.agent_name = str(data.get("agent_name", cfg.agent_name))
         cfg.trusted_proxies = [str(x) for x in data.get("trusted_proxies", cfg.trusted_proxies)]

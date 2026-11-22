@@ -126,6 +126,21 @@ def read_jobs(data) -> list[dict]:
     return out
 
 
+_TOOL_KINDS = [("search", r"search"), ("web", r"browser|web|fetch|extract|crawl|url|http"), ("docker", r"docker|container"), ("git", r"git"),
+               ("db", r"sql|database|\bdb\b"), ("python", r"python|execute_code|code_exec"), ("terminal", r"terminal|shell|bash|process"),
+               ("mail", r"mail|email|send_message|message"), ("clock", r"cron|schedule|clock"), ("vault", r"memory|vault|obsidian|note|skill"),
+               ("code", r"file|read|write|patch|edit")]
+
+
+def tool_kind(name) -> str:
+    """Which drawn tool icon a tool name stands for (the icon glows while the agent really uses that tool), or "" for none."""
+    n = str(name or "").lower()
+    for kind, pattern in _TOOL_KINDS:
+        if re.search(pattern, n):
+            return kind
+    return ""
+
+
 def _to_ms(t):
     if t is None:
         return None
@@ -293,6 +308,36 @@ class Overview:
                       "calls": tot.get("total_api_calls"), "tokens_in": tot.get("total_input"), "tokens_out": tot.get("total_output")},
             "days": days, "tools": tools, "recent": sessions, "board": board_summary(board),
         }
+
+    async def tool_activity(self) -> dict:
+        """The agent's most recent tool call, by kind and time (names and times only, never arguments). Cached for a few seconds,
+        so every open page asking at once costs one look at Hermes."""
+        now = time.time()
+        cached = getattr(self, "_tool_cache", None)
+        if cached and now - cached[0] < 3:
+            return cached[1]
+        # look past the empty scheduled check-ins that Hermes opens every few minutes: only sessions with messages can hold tool calls
+        status, data = await self.hermes.dash_json("/api/sessions?limit=15")
+        sessions = (data.get("sessions", []) if isinstance(data, dict) else data) if status == 200 and data else []
+        sessions = [s for s in sessions if isinstance(s, dict) and s.get("id") and int(s.get("message_count") or 0) > 0]
+        sessions.sort(key=lambda s: -(_to_ms(s.get("last_active")) or 0))
+        sessions = sessions[:3]
+        got = await asyncio.gather(*[self.hermes.dash_json("/api/sessions/%s/messages?limit=40&order=latest" % s["id"]) for s in sessions])
+        calls = []
+        for st, body in got:
+            msgs = (body.get("messages", []) if isinstance(body, dict) else body) if st == 200 and body else []
+            for m in msgs:
+                if not isinstance(m, dict):
+                    continue
+                for tc in m.get("tool_calls") or []:
+                    name = ((tc or {}).get("function") or {}).get("name") if isinstance(tc, dict) else None
+                    at = _to_ms(m.get("timestamp"))
+                    if name and at:
+                        calls.append({"name": str(name)[:60], "kind": tool_kind(name), "at": at})
+        calls.sort(key=lambda c: -c["at"])
+        out = {"latest": calls[0] if calls else None, "recent": calls[:8]}
+        self._tool_cache = (now, out)
+        return out
 
     async def home(self, infra: bool, today: datetime.date | None = None, now: float | None = None, personal: bool = True) -> dict:
         """infra: may see the server's health. personal: may see the install's own notes, jobs, board and chats (owners)."""
