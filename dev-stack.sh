@@ -32,12 +32,18 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
+web_tls=()
+if [[ -n ${ATRIUM_TLS_CERT:-} || -n ${ATRIUM_TLS_KEY:-} ]]; then
+    : "${ATRIUM_TLS_CERT:?set the frontend TLS certificate path}"
+    : "${ATRIUM_TLS_KEY:?set the frontend TLS private key path}"
+    web_tls=(--ssl-certfile "$ATRIUM_TLS_CERT" --ssl-keyfile "$ATRIUM_TLS_KEY")
+fi
 cd "$root"
 "$ATRIUM_RUNTIME_PYTHON" -m uvicorn hermes_cli.web_server:app --host 127.0.0.1 --port 18644 &
 children+=("$!")
 "$ATRIUM_RUNTIME_PYTHON" -m hermes_cli.main gateway run &
 children+=("$!")
 cd atrium/app
-"$ATRIUM_WEB_PYTHON" -m uvicorn run:app --host 127.0.0.1 --port 18648 &
+"$ATRIUM_WEB_PYTHON" -m uvicorn run:app --host 127.0.0.1 --port 18648 "${web_tls[@]}" &
 children+=("$!")
 wait -n "${children[@]}"

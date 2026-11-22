@@ -4,11 +4,19 @@ The root is Hermes Agent at 3b421578588243f920886e6fe79a6faa87ea026e. The atrium
 
 ## Start the source build on Linux
 
-Use a dedicated development account or disposable environment. Provision a runtime Python environment with the pinned root project's development setup and gateway, API server, dashboard and MCP dependencies. In a separate Python environment install atrium/requirements.txt. The frontend and runtime can have different dependency versions.
+From this checkout on Linux, run the following as your own user. The prerequisites are Bash 5.1+, uv, util-linux flock, and GNU coreutils. The first run requires network access for dependencies.
 
-Set ATRIUM_RUNTIME_PYTHON and ATRIUM_WEB_PYTHON to their absolute interpreter paths. Set ATRIUM_STATE_DIR to an empty private directory owned by the developer. Supply distinct random API_SERVER_KEY and HERMES_DASHBOARD_SESSION_TOKEN secrets through the process environment. For a signed-in test, set OWNER_PASSWORD_HASH for the bootstrap owner in the example profile. Configure the test model in the runtime profile under ATRIUM_STATE_DIR/runtime. Leave production configuration outside the checkout and build from tracked sources only.
+```bash
+./atrium/start
+```
 
-Run ./atrium/dev-stack.sh from the checkout. Open http://127.0.0.1:18648/login for the login page or /healthz for readiness of the frontend. The dashboard and gateway listen on loopback ports 18644 and 18645. Health of the frontend alone does not establish model or tool readiness. Use a verified HTTPS origin when testing a browser sign-in with secure cookies. Stop the launcher to stop its three child processes.
+Choose a password of at least 12 characters for the initial **owner** account at the hidden prompt. The launcher provisions Python 3.14 environments for the gateway and web app, generates private service keys, and starts the three processes. A subsequent run reuses the account, service keys and runtime state. Use Ctrl-C to stop the stack.
+
+Open http://localhost:18648/login on the same machine. The dashboard and gateway listen on loopback ports 18644 and 18645. For HTTPS, set ATRIUM_TLS_CERT and ATRIUM_TLS_KEY to an appropriate trusted certificate chain and its PEM private key before starting. Open the HTTPS URL matching that certificate. Session cookies retain their Secure flag.
+
+By default the profile lives under `$XDG_DATA_HOME/atrium` or `~/.local/share/atrium`. Override it with ATRIUM_STATE_DIR for a disposable install. Keep the directory private (0700) and outside the checkout. Configure the model and provider in the profile's runtime/config.yaml and supply the provider credentials through the runtime's supported configuration. Provider onboarding through Atrium is still pending.
+
+For development with existing Python environments, atrium/dev-stack.sh accepts ATRIUM_RUNTIME_PYTHON, ATRIUM_WEB_PYTHON, ATRIUM_STATE_DIR, API_SERVER_KEY and HERMES_DASHBOARD_SESSION_TOKEN.
 
 For release qualification, connect an approved HTTPS MCP fixture in Settings, test it, then ask a new chat to call a discovered tool. Verify the server received the argument and the chat returned its result after the gateway refreshed the tool registry.
 
