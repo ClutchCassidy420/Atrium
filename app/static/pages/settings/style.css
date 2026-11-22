@@ -101,3 +101,19 @@
 .ats-btn-danger:hover:not(:disabled) { background: rgba(255, 92, 122, 0.14); }
 @media (max-width: 640px) { .sv-row { grid-template-columns: minmax(0, 1fr) auto; } .sv-chips { grid-column: 1 / 2; grid-row: 2; } }
 .sv-warn { padding: 0.55rem 0.7rem; border-radius: 10px; border: 1px solid rgba(255, 190, 90, 0.5); background: rgba(255, 190, 90, 0.1); color: #ffcf85; font-size: 0.82rem; line-height: 1.45; }
+
+.ats-connection {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.ats-connection h4 {
+  margin: 0;
+}
+
+.ats-connection-field {
+  display: grid;
+  gap: .35rem;
+  margin: .65rem 0;
+  max-width: 26rem;
+}

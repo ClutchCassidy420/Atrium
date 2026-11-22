@@ -17,6 +17,11 @@ TIMEOUT_S = 5.0
 DATA_FOLDERS = ("atrium", "cron", "obsidian-vault")
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
 class Hermes:
     def __init__(self, api_base: str = "", api_key: str = "", dash_base: str = "", dash_token: str = "", data_dir: str = ""):
         self.api_base = api_base.rstrip("/")
@@ -59,11 +64,13 @@ class Hermes:
             return status, None
 
     @staticmethod
-    def _send(method: str, url: str, headers: dict, payload, timeout: float = TIMEOUT_S) -> tuple[int, bytes]:
+    def _send(method: str, url: str, headers: dict, payload, timeout: float = TIMEOUT_S,
+              *, allow_redirects: bool = True) -> tuple[int, bytes]:
         data = json.dumps(payload).encode() if payload is not None else None
         try:
             req = urllib.request.Request(url, data=data, headers=dict(headers, **{"Content-Type": "application/json"}), method=method)
-            with urllib.request.urlopen(req, timeout=timeout) as r:
+            open_request = urllib.request.urlopen if allow_redirects else urllib.request.build_opener(_NoRedirect()).open
+            with open_request(req, timeout=timeout) as r:
                 return r.status, r.read(8_000_000)
         except urllib.error.HTTPError as e:
             return e.code, e.read(200_000)
@@ -78,9 +85,13 @@ class Hermes:
         except ValueError:
             return status, None
 
-    async def dash_call(self, method: str, path: str, payload=None, timeout: float = TIMEOUT_S):
+    async def dash_call(self, method: str, path: str, payload=None, timeout: float = TIMEOUT_S,
+                        *, allow_redirects: bool = True):
         """Any call to the Hermes dashboard server (sessions, transcription), with the fixed token. Returns (status, json or None)."""
-        status, body = await asyncio.to_thread(self._send, method, self.dash_base + path, self._dash_headers(), payload, timeout)
+        status, body = await asyncio.to_thread(
+            self._send, method, self.dash_base + path, self._dash_headers(), payload, timeout,
+            allow_redirects=allow_redirects,
+        )
         try:
             return status, json.loads(body) if body else None
         except ValueError:
