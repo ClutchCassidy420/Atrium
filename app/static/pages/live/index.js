@@ -49,16 +49,18 @@
     var run_ = useState(null), run = run_[0], setRun = run_[1];                   // { id, status, controls, gen }
     var sp_ = useState(false), speaking = sp_[0], setSpeaking = sp_[1];
     var cap_ = useState(""), caption = cap_[0], setCaption = cap_[1];
-    var poll = UI.usePoll("/api/overview", 30000), ov = poll[0];
+    var poll = UI.usePoll("/api/overview", 10000), ov = poll[0];
     var mic_ = useState("idle"), mic = mic_[0], setMic = mic_[1];                     // idle | start | rec | busy
     var secs_ = useState(0), micSecs = secs_[0], setMicSecs = secs_[1];
     var rec = useRef({ recorder: null, stream: null, starting: false, timer: null, byKey: false, alive: true, pointerDown: false, keyDown: false, want: false }), submitRef = useRef(null);
     var stageRef = useRef(null), headRef = useRef(null), deskRef = useRef(null), capBuf = useRef([]), timers = useRef({}), session = useRef(newSession()), logRef = useRef(null);
+    var reactor = useRef(null), stopWatch = useRef(null), stopTool = useRef(null), prevAgent = useRef(null), agentRef = useRef("idle");
     var live = !!(run && !TERMINAL[run.status]);
 
     var ag = (ov && ov.agent) || {};
     var base = ag.running === false ? "offline" : (ag.busy || ag.active_agents) ? "working" : "idle";
     var agentState = run && run.status === "waiting_for_approval" ? "waiting" : live ? "working" : base;
+    agentRef.current = agentState;
 
     // 1. start the engine and load the character
     useEffect(function () {
@@ -81,6 +83,16 @@
               d.loadClips(AV + "/clips/ual1").catch(function () { /* no clip library installed */ });
               var notes = function () { fetchJSON(AV + "/projects").then(function (r) { if (deskRef.current) deskRef.current.setBoardNotes((r && r.notes) || []); }, function () { /* keep what is pinned */ }); };
               notes(); timers.current.notes = setInterval(notes, 60000);
+              // her reactions to what happens (work starts, approval, job done, failures and being fed up, you coming back)
+              if (window.__AVATAR_REACT__) {
+                reactor.current = window.__AVATAR_REACT__.create(function () { return deskRef.current; }, {
+                  sound: function () { return pref("aloud", "1") !== "0"; }, speakUrl: AV + "/speak",
+                  onCaption: function (w) { if (w === "" || w === "#@%&!") { capBuf.current = []; setCaption(w); } else { capBuf.current.push(String(w || "").trim()); setCaption(capBuf.current.slice(-8).join(" ")); } }
+                });
+                stopWatch.current = reactor.current.watch();
+              }
+              // the whiteboard magnet for the tool she is really using glows
+              if (window.__AVATAR_TOOL__) stopTool.current = window.__AVATAR_TOOL__.feed(function () { return deskRef.current; }, function () { return agentRef.current === "working"; });
             }
             setMsg(""); setPhase("ready");
           });
@@ -89,6 +101,9 @@
       return function () {
         dead = true;
         var t = timers.current; Object.keys(t).forEach(function (k) { clearInterval(t[k]); clearTimeout(t[k]); });
+        try { if (stopWatch.current) stopWatch.current(); } catch (x) { /* already stopped */ }
+        try { if (stopTool.current) stopTool.current(); } catch (x) { /* already stopped */ }
+        stopWatch.current = null; stopTool.current = null; reactor.current = null;
         try { if (deskRef.current) deskRef.current.dispose(); } catch (x) { /* already gone */ }
         deskRef.current = null;
         try { if (headRef.current) { headRef.current.stopSpeaking(); headRef.current.dispose(); } } catch (x) { /* already gone */ }
@@ -113,6 +128,14 @@
 
     function head() { return headRef.current; }
     function react(k) { try { if (deskRef.current) deskRef.current.react(k); } catch (x) { /* optional */ } }
+    function reactEv(k) { if (reactor.current) reactor.current.event(k); else react(k); }      // through the shared reactions (repeated failures make her fed up)
+
+    // what the agent is doing changed: work started, approval needed, work finished (also for jobs and cards that run without this page)
+    useEffect(function () {
+      if (phase !== "ready") return;
+      var prev = prevAgent.current; prevAgent.current = agentState;
+      if (prev !== null && reactor.current) reactor.current.state(prev, agentState);
+    }, [agentState, phase]);
 
     // 3. the reply is read aloud, her lips following the words
     function say(t) {
@@ -140,10 +163,10 @@
     function send() { submit(text.trim()); }
     function submit(t) {
       if (!t || live) return;
-      setMsg(""); setText(""); stopSpeaking(); push({ role: "user", text: t }); react("send");
+      setMsg(""); setText(""); stopSpeaking(); push({ role: "user", text: t }); reactEv("send");
       fetchJSON(CHAT + "/send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session_id: session.current, message: t }) })
-        .then(function (r) { setRun({ id: r.run_id, status: r.status || "started", controls: [] }); react("work"); },
-          function (e) { push({ role: "assistant", text: errText(e), error: true }); react("error"); });
+        .then(function (r) { setRun({ id: r.run_id, status: r.status || "started", controls: [] }); },      // "work" and "approval" follow from her state below
+          function (e) { push({ role: "assistant", text: errText(e), error: true }); reactEv("error"); });
     }
     useEffect(function () {
       if (!live) return undefined;
@@ -154,10 +177,10 @@
           var next = { id: run.id, status: r.status, controls: r.pending_controls || [], gen: r.execution_generation };
           if (TERMINAL[r.status]) {
             var out = String(r.output || "").trim();
-            if (r.status === "completed" && out) { push({ role: "assistant", text: out }); react("answer"); if (aloud) say(out); }
+            if (r.status === "completed" && out) { push({ role: "assistant", text: out }); if (reactor.current) reactor.current.answered(); react("answer"); if (aloud) say(out); }
             else push({ role: "assistant", text: r.status === "completed" ? "(no answer)" : (r.error || "That did not finish (" + r.status + ")."), error: r.status !== "completed" });
-            if (r.status !== "completed") react("error");
-          } else if (r.status === "waiting_for_approval" && !(run.status === "waiting_for_approval")) react("approval");
+            if (r.status !== "completed") reactEv("error");
+          }
           setRun(next);
         }, function (e) { if (alive) setMsg(errText(e)); }).then(function () { if (alive) timer = setTimeout(tick, 900); });
       }

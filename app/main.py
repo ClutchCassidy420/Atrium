@@ -319,6 +319,12 @@ def make_app(cfg: configmod.Config | None = None, hermes: Hermes | None = None, 
         who = current(request)
         return deny(who, "use") or await overview.home(infra=cfg.allows(who["role"], "admin"), personal=cfg.allows(who["role"], "admin"))
 
+    @app.get("/api/tool-activity")
+    async def tool_activity_route(request: Request):
+        """The agent's latest tool call (kind, name, time), for the glowing tool icons. Owners only; never any arguments."""
+        who = current(request)
+        return deny(who, "admin") or await overview.tool_activity()
+
     @app.get("/api/systems")
     async def systems_route(request: Request):
         who = current(request)
@@ -436,6 +442,7 @@ def make_app(cfg: configmod.Config | None = None, hermes: Hermes | None = None, 
         data = {"brand": cfg.brand, "agentName": cfg.agent_name, "user": who["user"], "name": who["name"], "role": who["role"],
                 "navGroups": cfg.nav_groups,
                 "accordionNav": cfg.accordion_nav,
+                "avatarPresets": cfg.avatar_presets,
                 "navIcons": cfg.nav_icons,
                 "pwa": ({"manifest": CHAT_PREFIX + "/manifest.webmanifest", "sw": CHAT_PREFIX + "/sw.js", "icon": CHAT_PREFIX + "/icon-192.png"} if cfg.push_enabled else None),
                 "pages": [{k: p[k] for k in ("id", "path", "label", "plugin", "scripts", "styles", "group", "subgroup", "order", "nav", "icon")} for p in allowed_pages(who)]}

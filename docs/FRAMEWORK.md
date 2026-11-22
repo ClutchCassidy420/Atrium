@@ -16,7 +16,7 @@ person, a company or a host.
 ## Settings, in three layers (a later one wins)
 
 1. Built-in defaults (generic).
-2. `INSTANCE_DIR/instance.toml`: `brand`, `agent_name`, `trusted_proxies`, `pages_disabled`, `accordion_nav`, `bootstrap_user`, `[login]`, `[roles]`, `[redirects]` (old address = current address, so links in old notifications and bookmarks still land on the right page).
+2. `INSTANCE_DIR/instance.toml`: `brand`, `agent_name`, `trusted_proxies`, `pages_disabled`, `accordion_nav`, `avatar_presets`, `bootstrap_user`, `[login]`, `[roles]`, `[redirects]` (old address = current address, so links in old notifications and bookmarks still land on the right page).
 3. Environment: `DATA_DIR`, `INSTANCE_DIR`, `TRUSTED_PROXIES`, `HERMES_API_BASE`, `HERMES_API_KEY`, `HERMES_DASHBOARD_BASE`,
    `HERMES_DASHBOARD_TOKEN`, `HERMES_DATA_DIR`, `OWNER_PASSWORD_HASH` (optional, only to create the first owner).
 
@@ -65,6 +65,14 @@ Every idea in the pipeline belongs to a project. In the default project (`idea-p
 Restore points in the sidecar get unique names, and a rewind is checked against the checkpoint's contents before it reports success (a checkpoint of the present is kept, so a rewind can be undone). The terminal closes within a few seconds if the person's owner access is withdrawn.
 
 The agent's shared browser has no open debugging port. The sidecar publishes `GET /json/version` and the `/devtools/browser/<id>` WebSocket on its private port 9000, and both require the `X-CDP-Token` header to equal the sidecar's `CDP_TOKEN`; with `CDP_TOKEN` unset the entry point is closed. The agent's CDP client must be able to send that header. Check this before upgrading an install whose agent connected to the old port 9222.
+
+### The avatar: reactions, tool icons and looks
+
+The character notices what happens (`static/pages/avatar/reactions.js`, used by the Live agent page): you send a message, work starts, an approval is needed, a job finishes, a failure, an answer arrives, you come back after more than five minutes away. One failure is a wince; failing again within ten minutes makes her more fed up each time (up to a limit), and an answer arriving clears the count. A reaction can never break the page: a missing or failing character is ignored.
+
+While the agent works, the icon for the tool it is really using glows: the magnet on the 3D character's whiteboard and the matching icon around the drawn avatar. `GET /api/tool-activity` (owners only) gives the agent's latest tool call as a name, a kind (search, web, docker, git, db, python, terminal, mail, clock, vault, code) and a time, read from the agent's most recent sessions that have messages (the empty scheduled check-ins are skipped), cached for 3 seconds so every open page costs one look at Hermes. It never returns arguments. `toolsignal.js` asks only while the agent is working and the tab is visible, shares one timer between everything on the page, and the glow lasts 25 seconds after the call.
+
+An install can offer its own looks in Settings > Avatar with `[[avatar_presets]]` in `instance.toml`: each has a `name` (up to 40 characters) and a `look` table of plain values (text, numbers, true or false; up to 24 keys). A list that is not in that shape is ignored as a whole, never half used.
 
 ### Chat: approvals and read-aloud
 

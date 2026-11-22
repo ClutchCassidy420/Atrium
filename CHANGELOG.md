@@ -26,6 +26,9 @@
   answered, one answer per click, and answers refused for a run that is no longer current (a stale card can no longer approve something in a later run).
   **Live read-aloud**: each sentence is spoken as soon as it has printed. Tests: `tests/chat-approval.test.js`, `tests/chat-live.test.js`,
   `tests/test_chat_assets.py`.
+- **Avatar**: the Live agent character reacts to what happens (work, approval, done, failures with escalating frustration, welcome back); the icon of the
+  tool the agent is really using glows on the 3D whiteboard and around the drawn avatar (`/api/tool-activity`, owners only, names and times only); installs
+  can add their own looks with `[[avatar_presets]]` in `instance.toml` (validated). Tests: `tests/avatar.test.js`, `tests/test_tool_activity.py`.
 
 ## 1.0.1 (license change)
 
