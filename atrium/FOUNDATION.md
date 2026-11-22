@@ -34,3 +34,5 @@ Use the checkout that actually runs the current release to record its revision. 
 4. To roll back, stop the candidate. Run `./atrium/checkpoint restore "$checkpoint" "$recovered_profile"` with a new private profile path. Start the original checkout at the revision in release.json with ATRIUM_STATE_DIR pointing to the recovered profile. Restore any external dependencies and confirm referenced paths still resolve. New writes made after the checkpoint remain in the candidate's profile. Keep it for reconciliation.
 
 The launcher provisions its virtual environments on first use of a restored profile. Keep the pinned source and dependency cache available if rollback needs to work offline.
+
+For source releases, the root uv.lock pins the runtime and atrium/requirements-source.lock pins the Python 3.14 frontend environment with package hashes. To refresh the frontend lock after a reviewed dependency change, run `uv pip compile atrium/requirements.txt --python-version 3.14 --universal --generate-hashes --no-header --no-annotate -o atrium/requirements-source.lock` and test a fresh source install.
