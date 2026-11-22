@@ -142,3 +142,16 @@ def test_a_login_does_not_block_other_requests(make):
     elapsed = time.time() - start
     t.join()
     assert status == 200 and elapsed < 0.35
+
+
+def test_cli_session_revocation_is_visible_to_running_web_app(tmp_path):
+    path = tmp_path / "sessions.json"
+    web = auth.Sessions(path)
+    cli = auth.Sessions(path)
+    old = web.create("alice")
+    other = cli.create("bob")
+    assert cli.delete_user("alice") == 1
+    assert web.get(old) is None
+    web.create("carol")
+    assert cli.get(old) is None
+    assert web.get(other)["user"] == "bob"

@@ -6,15 +6,19 @@ stored), so a session can be revoked and a stolen database does not hand out usa
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
 import base64
 import hashlib
 import hmac
 import json
+import logging
 import os
 import secrets
 import threading
 import time
 from pathlib import Path
+
+LOG = logging.getLogger(__name__)
 
 SCRYPT_N, SCRYPT_R, SCRYPT_P = 2 ** 15, 8, 1
 SESSION_IDLE_S = 7 * 24 * 3600        # signed out after 7 days without use
@@ -62,11 +66,38 @@ class Sessions:
         self.path = path
         self.lock = threading.Lock()
         self.items: dict[str, dict] = {}
-        if path and path.exists():
-            try:
-                self.items = json.loads(path.read_text())
-            except Exception:
-                self.items = {}
+
+    @contextmanager
+    def _transaction(self):
+        """Serialize web and CLI access and reload after acquiring the lock."""
+        with self.lock:
+            if self.path is None:
+                yield
+                return
+            with self.path.with_suffix(".lock").open("a+b") as handle:
+                if os.name == "nt":
+                    import msvcrt
+                    handle.seek(0)
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(handle, fcntl.LOCK_EX)
+                try:
+                    try:
+                        loaded = json.loads(self.path.read_text())
+                        self.items = loaded if isinstance(loaded, dict) else {}
+                    except FileNotFoundError:
+                        self.items = {}
+                    except (ValueError, OSError):                 # unreadable or damaged: start empty, as before (people sign in again), never fail every request
+                        LOG.warning("The sessions file could not be read; starting with no sessions.")
+                        self.items = {}
+                    yield
+                finally:
+                    if os.name == "nt":
+                        handle.seek(0)
+                        msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+                    else:
+                        fcntl.flock(handle, fcntl.LOCK_UN)
 
     @staticmethod
     def _key(sid: str) -> str:
@@ -80,12 +111,12 @@ class Sessions:
         os.chmod(tmp, 0o600)
         tmp.replace(self.path)
 
-    def create(self, user: str) -> str:
+    def create(self, user: str, credential: str = "") -> str:
         sid = secrets.token_urlsafe(32)
         now = time.time()
-        with self.lock:
+        with self._transaction():
             self._purge(now)
-            self.items[self._key(sid)] = {"user": user, "created": now, "last": now}
+            self.items[self._key(sid)] = {"user": user, "created": now, "last": now, "credential": credential}
             self._save()
         return sid
 
@@ -98,7 +129,7 @@ class Sessions:
         if not sid:
             return None
         now = time.time()
-        with self.lock:
+        with self._transaction():
             s = self.items.get(self._key(sid))
             if not s:
                 return None
@@ -114,13 +145,13 @@ class Sessions:
     def delete(self, sid: str | None) -> None:
         if not sid:
             return
-        with self.lock:
+        with self._transaction():
             if self.items.pop(self._key(sid), None) is not None:
                 self._save()
 
     def delete_user(self, user: str) -> int:
         """Sign a user out everywhere (after a password change or removal). Returns how many sessions ended."""
-        with self.lock:
+        with self._transaction():
             dead = [k for k, v in self.items.items() if v.get("user") == user]
             for k in dead:
                 del self.items[k]
@@ -129,7 +160,7 @@ class Sessions:
             return len(dead)
 
     def delete_all(self) -> None:
-        with self.lock:
+        with self._transaction():
             self.items = {}
             self._save()
 

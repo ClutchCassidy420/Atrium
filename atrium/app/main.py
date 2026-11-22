@@ -6,6 +6,7 @@ environment, never from this file. See docs/FRAMEWORK.md.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import html
 import json
 import mimetypes
@@ -74,6 +75,8 @@ def make_app(cfg: configmod.Config | None = None, hermes: Hermes | None = None, 
             return None
         u = users.get(s["user"])
         if not u or not cfg.valid_role(u["role"]):
+            return None
+        if s.get("credential") and s["credential"] != hashlib.sha256(u["hash"].encode()).hexdigest():
             return None
         return {"user": u["username"], "role": u["role"], "name": u.get("name") or ""}
 
@@ -212,7 +215,7 @@ def make_app(cfg: configmod.Config | None = None, hermes: Hermes | None = None, 
         for k in keys:
             throttle.ok(k)
         resp = RedirectResponse("/", status_code=303)
-        resp.set_cookie(cookie, sessions.create(user["username"]), max_age=30 * 24 * 3600, path="/",
+        resp.set_cookie(cookie, sessions.create(user["username"], hashlib.sha256(stored.encode()).hexdigest()), max_age=30 * 24 * 3600, path="/",
                         secure=secure_cookie, httponly=True, samesite="strict")
         return resp
 
