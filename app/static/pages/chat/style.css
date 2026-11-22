@@ -163,8 +163,9 @@
 .atc-approval { padding: 0.8rem 1rem; border: 1px solid rgba(255, 200, 87, 0.5); border-radius: 14px; background: rgba(255, 200, 87, 0.08); }
 .atc-approval-title { font-size: 0.72rem; letter-spacing: 0.12em; text-transform: uppercase; font-weight: 800; color: var(--atc-warn); }
 .atc-approval-label { margin-top: 0.2rem; font-weight: 600; font-size: 0.9rem; }
-.atc-approval-detail { margin: 0.4rem 0 0; padding: 0.5rem 0.7rem; max-height: 8rem; overflow: auto; font-size: 0.78rem; white-space: pre-wrap; overflow-wrap: anywhere; border-radius: 8px; background: rgba(0, 0, 0, 0.3); }
-.atc-approval-actions { display: flex; gap: 0.5rem; margin-top: 0.6rem; }
+.atc-approval-reason { margin: 0.45rem 0; overflow-wrap: anywhere; }
+.atc-approval-detail { margin: 0.4rem 0 0; padding: 0.5rem 0.7rem; max-height: 14rem; overflow: auto; font-size: 0.82rem; white-space: pre-wrap; overflow-wrap: anywhere; border-radius: 8px; background: rgba(0, 0, 0, 0.3); }
+.atc-approval-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.6rem; }
 
 /* ---------- composer ---------- */
 .atc-composer-wrap { flex: none; width: 100%; max-width: 860px; margin: 0 auto; padding: 0.4rem 1rem 0.8rem; }
