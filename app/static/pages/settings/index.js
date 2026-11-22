@@ -277,6 +277,130 @@
     };
   }
 
+  function ConnectCard(props) {
+    var entry = props.entry;
+    function submit(event) {
+      event.preventDefault();
+      var form = event.currentTarget;
+      var env = {};
+      new FormData(form).forEach(function (value, key) {
+        if (value) env[key] = value;
+      });
+      form.reset();
+      props.connect(entry.name, env);
+    }
+    return h("div", { className: "ats-row ats-connection" },
+      h("h4", { className: "ats-row-t" }, entry.name),
+      entry.description && h("p", { className: "ats-note" }, entry.description),
+      entry.host && h("p", { className: "ats-note" }, entry.host),
+      entry.installed || props.installed ? h("div", { className: "ats-note" }, "Installed") :
+        entry.blocked ? h("div", { className: "ats-note" }, entry.blocked) :
+          h("form", { onSubmit: submit },
+            entry.fields.map(function (field) {
+              return h("label", { key: field.name, className: "ats-connection-field" }, field.label,
+                h("input", { name: field.name, type: "password", autoComplete: "off",
+                  required: field.required, maxLength: 8192, disabled: props.disabled, className: "ats-input" }));
+            }),
+            h("button", { type: "submit", className: "ats-btn", disabled: props.disabled }, "Connect")));
+  }
+
+  function Connections() {
+    var catalogState = useState(null), catalog = catalogState[0], setCatalog = catalogState[1];
+    var installedState = useState(null), installed = installedState[0], setInstalled = installedState[1];
+    var filterState = useState(""), filter = filterState[0], setFilter = filterState[1];
+    var busyState = useState(false), busy = busyState[0], setBusy = busyState[1];
+    var resultState = useState(null), result = resultState[0], setResult = resultState[1];
+    var messageState = useState(""), message = messageState[0], setMessage = messageState[1];
+    var base = API + "/connections";
+
+    function read(path, key, set) {
+      return fetchJSON(base + path).then(function (data) { set({ rows: data[key] }); },
+        function (error) { set({ error: errText(error) }); });
+    }
+    function refresh() {
+      return Promise.all([read("/catalog", "entries", setCatalog), read("/installed", "servers", setInstalled)]);
+    }
+    useEffect(function () { refresh(); }, []);
+    function run(name, suffix, method, body, success) {
+      setMessage("");
+      setResult(null);
+      setBusy(true);
+      var options = { method: method };
+      if (body) {
+        options.headers = { "Content-Type": "application/json" };
+        options.body = JSON.stringify(body);
+      }
+      return fetchJSON(base + "/" + encodeURIComponent(name) + suffix, options).then(function (data) {
+        if (suffix === "/test") {
+          setResult({ name: name, tools: data.tools });
+          return;
+        }
+        setMessage(success);
+        return refresh();
+      }).catch(function (error) {
+        setMessage(errText(error));
+        if (suffix !== "/test") return refresh();
+      }).finally(function () { setBusy(false); });
+    }
+    function connect(name, env) {
+      return run(name, "/connect", "POST", { env: env }, name + " connected. Test it, then start a fresh chat to use its tools.");
+    }
+    var installedNames = new Set(installed && installed.rows ? installed.rows.map(function (server) { return server.name; }) : []);
+    var matching = catalog && catalog.rows && catalog.rows.filter(function (entry) {
+      return (entry.name + " " + entry.description).toLowerCase().includes(filter.trim().toLowerCase());
+    });
+
+    return h(SDK.React.Fragment, null,
+      h("div", { role: "status", className: "ats-note" }, busy ? "Working…" : message),
+      h("div", { className: "ats-card" },
+        h("h3", { className: "ats-h" }, "Installed connections"),
+        h("p", { className: "ats-note" }, "Start a fresh chat after Hermes reloads its connections. The gateway may take a moment to pick up changes."),
+        h("button", { type: "button", className: "ats-btn", disabled: busy, onClick: function () {
+          setBusy(true);
+          setMessage("");
+          setResult(null);
+          refresh().finally(function () { setBusy(false); });
+        } }, "Refresh"),
+        !installed ? h("p", { className: "ats-note" }, "Loading…") :
+          installed.error ? h("p", { role: "alert", className: "ats-note" }, installed.error) :
+            !installed.rows.length ? h("p", { className: "ats-note" }, "No installed connections.") :
+              installed.rows.map(function (server) {
+                return h("div", { key: server.name, className: "ats-row ats-connection" },
+                  h("h4", { className: "ats-row-t" }, server.name),
+                  h("p", { className: "ats-note" }, (server.enabled ? "Enabled" : "Disabled") +
+                    (server.managed ? " · Managed by a Hermes plugin" : "")),
+                  h("div", { className: "ats-actions ats-wrap" },
+                    h("button", { type: "button", className: "ats-btn", disabled: busy, onClick: function () {
+                      run(server.name, "/test", "POST");
+                    } }, "Test"),
+                    !server.managed && h("button", { type: "button", className: "ats-btn", disabled: busy, onClick: function () {
+                      run(server.name, "/enabled", "PUT", { enabled: !server.enabled },
+                        server.name + (server.enabled ? " disabled." : " enabled."));
+                    } }, server.enabled ? "Disable" : "Enable"),
+                    !server.managed && h("button", { type: "button", className: "ats-btn", disabled: busy, onClick: function () {
+                      if (window.confirm("Remove " + server.name + "? Hermes may retain saved credentials.")) run(server.name, "", "DELETE", null, server.name + " removed.");
+                    } }, "Remove")),
+                  result && result.name === server.name && h("div", { role: "status" },
+                    h("p", { className: "ats-note" }, result.tools.length ? "Tools discovered by Hermes" : "Connection succeeded. Hermes discovered no tools."),
+                    result.tools.length > 0 && h("ul", null, result.tools.map(function (tool, index) {
+                      return h("li", { key: index }, tool);
+                    }))));
+              })),
+      h("div", { className: "ats-card" },
+        h("h3", { className: "ats-h" }, "Hermes MCP catalog"),
+        !catalog ? h("p", { className: "ats-note" }, "Loading…") :
+          catalog.error ? h("p", { role: "alert", className: "ats-note" }, catalog.error) :
+            h(SDK.React.Fragment, null,
+              h("label", { className: "ats-connection-field" }, "Find a connection",
+                h("input", { type: "search", className: "ats-input", value: filter,
+                  onChange: function (event) { setFilter(event.target.value); } })),
+              !matching.length && h("p", { className: "ats-note" }, "No matching connections."),
+              matching.map(function (entry) {
+                return h(ConnectCard, { key: entry.name, entry: entry, installed: installedNames.has(entry.name),
+                  disabled: busy || !installed || !!installed.error, connect: connect });
+              }))));
+  }
+
   var SECTIONS = [
     { id: "general", label: "General", icon: "🛠️", note: "Your agent's name and voice, and shortcuts to the other pages.", parts: [AgentCard, VoiceCard, Shortcuts, Account] },
     { id: "notifications", label: "Notifications", icon: "🔔", note: "What is allowed to buzz your phone, and which devices get it.", parts: [Notifications, Devices] },
@@ -285,6 +409,7 @@
     { id: "avatar", label: "Avatar", icon: "🎨", note: "Pick and customise how the agent looks.", parts: [embed("avatar", "The avatar editor did not load.")] },
     { id: "memory", label: "Memory", icon: "🧠", note: "The agent's notes as a graph: every note a dot, every link a line. Read only.", parts: [embed("memory", "The memory view did not load.")] },
     { id: "engine", label: "Cloud use", icon: "☁️", note: "Which engine answers chats from the app, and what the cloud has used.", parts: [Cloud] },
+    { id: "connections", label: "Connections", icon: "🔌", note: "Connect external tools to Hermes.", parts: [Connections] },
     { id: "server", label: "Server", icon: "🖥️", note: "Install updates, reboot or shut down the machine this runs on. Owners only.", parts: [embed("server", "The server actions did not load.")], hostOnly: true }
   ];
 

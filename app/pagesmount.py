@@ -9,6 +9,8 @@ import os
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
+from connections_backend import connection_router
+
 OWNER_PLUGINS = ("memory", "workflows", "settings", "room")
 # the only routes of the Mission Control backend that the app mounts (the rest is replaced by the Home page)
 MISSION_ROUTES = ("/focus", "/focus/toggle", "/focus/remove", "/engine", "/soul", "/soul/version", "/soul/restore")
@@ -43,6 +45,8 @@ def mount_owner_pages(app, cfg, hermes, current, same_origin) -> None:
 
     for name in OWNER_PLUGINS:
         app.include_router(backends[name].router, prefix=prefix_for(name), dependencies=[Depends(guard)])
+
+    app.include_router(connection_router(hermes), prefix=prefix_for("settings"), dependencies=[Depends(guard)])
 
     hostctl_backend.configure(cfg, hermes)
     import overview
