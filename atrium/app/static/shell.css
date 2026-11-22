@@ -64,3 +64,24 @@ body.vn { display: block; padding: 0; margin: 0; font: 15px/1.5 var(--font-sans)
 #vn-nav a[aria-current="page"] { background: linear-gradient(90deg, rgba(var(--primary-rgb), .26), rgba(var(--primary-rgb), .06)); box-shadow: inset 3px 0 0 var(--color-accent, #ff6fb5); }
 .vn-sub .vn-ico { width: 1.45rem; height: 1.45rem; border-radius: 8px; font-size: .8rem; }
 .vn-brand { background: linear-gradient(90deg, #9d8cff, var(--color-secondary) 55%, #ffb15f); -webkit-background-clip: text; background-clip: text; color: transparent; }
+
+/* a narrow icon rail: the sidebar collapses to icons on wide screens (the toggle is hidden on phones, where the sidebar is a drawer) */
+.vn-rail-toggle { display: none; }
+@media (width > 820px) {
+  .vn-rail-toggle { display: grid; place-items: center; inline-size: 2.25rem; block-size: 2.25rem; padding: 0; font-size: 1.55rem; cursor: pointer; }
+  .vn-rail-toggle:hover { background: rgba(var(--primary-rgb), .12); }
+  .vn-shell.vn-rail { grid-template-columns: 64px minmax(0, 1fr); }
+  .vn-rail .vn-side-head, .vn-rail .vn-side-foot { justify-content: center; padding-inline: 0; }
+  .vn-rail .vn-side-head .vn-brand, .vn-rail .vn-user, .vn-rail .vn-lt, .vn-rail .vn-chev, .vn-rail .vn-hint { display: none; }
+  .vn-rail #vn-nav { padding-inline: 5px; scrollbar-width: thin; }
+  .vn-rail #vn-nav a, .vn-rail #vn-nav .vn-group-btn { justify-content: center; min-height: 40px; padding: 4px 0; }
+  .vn-rail .vn-sub { margin: 2px 0 4px; padding: 0; border: 0; }
+  .vn-rail .vn-sub .vn-ico { width: 1.4rem; height: 1.4rem; }
+  .vn-rail .vn-current-group > .vn-group-btn { background: rgba(var(--primary-rgb), .11); }
+  .vn-rail .vn-gear { margin: 0; }
+  .vn-rail .vn-out button, .vn-rail .vn-install-btn { width: 36px; height: 36px; padding: 0; font-size: 0; }
+  .vn-rail .vn-out button::after, .vn-rail .vn-install-btn::after { font-size: 1.05rem; }
+  .vn-rail .vn-out button::after { content: "↪" / ""; }
+  .vn-rail .vn-install-btn::after { content: "↓" / ""; }
+  .vn-rail #vn-install { padding-inline: 0; text-align: center; }
+}

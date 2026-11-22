@@ -16,6 +16,9 @@
   treated Hermes' normal `202 Accepted` answer to a started run as a failure. Tests: `tests/test_chat_model.py`.
 - **Color themes** (Settings > Appearance, everyone): seven dark palettes, saved per person and applied on first paint. Page stylesheets now use the
   design tokens instead of hard-coded brand colors (a mechanical, reversible swap; the default look is unchanged). Tests: `tests/test_themes.py`.
+- **Sidebar**: a collapsible icon rail (remembered per browser), an optional accordion mode (`accordion_nav = true` in `instance.toml`), and a name and
+  title on every entry. The sidebar tests (`nav.test.js`, `shim.test.js`) read each label's own element, which fixes the failures they had since the
+  sidebar started drawing an icon tile beside each label. Tests: `tests/nav.test.js` (new cases), `tests/test_navigation.py`.
 
 ## 1.0.1 (license change)
 

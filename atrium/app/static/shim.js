@@ -170,7 +170,7 @@
   /* A colored tile with a symbol or emoji in front of every sidebar entry. The color comes from a small palette, picked by the name, so the same
      entry always has the same color. Entries without an icon get the first letter of their name. */
   var HUES = [330, 205, 150, 35, 270, 8, 180, 52, 300, 120];
-  var DEFAULT_ICONS = { Agent: "\uD83E\uDD16", Work: "\uD83D\uDDC2\uFE0F", Server: "\uD83D\uDDA5\uFE0F", Developer: "\uD83E\uDDF0", Chat: "\uD83D\uDCAC" };
+  var DEFAULT_ICONS = { Agent: "\uD83E\uDD16", Work: "\uD83D\uDDC2\uFE0F", Server: "\uD83D\uDDA5\uFE0F", Developer: "\uD83E\uDDF0", Tools: "\uD83D\uDEE0\uFE0F", Chat: "\uD83D\uDCAC" };
   function tile(name, icon) {
     var s = 0, i;
     for (i = 0; i < name.length; i++) s = (s * 31 + name.charCodeAt(i)) % 9973;
@@ -185,6 +185,7 @@
   }
 
   function nav() {
+    var remembered = CONFIG.accordionNav ? {} : store("nav.open") || {};
     var host = document.getElementById("vn-nav");
     if (!host) return;
     var cur = window.location.pathname.replace(/\/+$/, "") || "/";
@@ -198,11 +199,17 @@
     pagesAll.forEach(function (p) { if (p.group) (groups[p.group] = groups[p.group] || []).push(p); });
     var listed = (CONFIG.navGroups || []).filter(function (g) { return groups[g]; });
     var names = listed.concat(Object.keys(groups).filter(function (g) { return listed.indexOf(g) < 0; }).sort());
-    var open = store("nav.open") || {};
+    // accordion: only the folder that holds the current page starts open, and opening one folder closes its siblings
+    function setOpen(w, b, on) { w.classList.toggle("vn-open", on); b.setAttribute("aria-expanded", String(on)); }
+    function closeSiblings(w, container) {
+      Array.prototype.forEach.call(container.children, function (c) {
+        if (c !== w && c.classList && c.classList.contains("vn-group")) { var cb = c.firstChild; setOpen(c, cb, false); }
+      });
+    }
     host.innerHTML = "";
 
     function link(p, parent) {
-      var a = el("a", { href: p.path });
+      var a = el("a", { href: p.path, title: p.label, "aria-label": p.label });
       a.appendChild(labelled(p.label, p.icon));
       if (p.path === cur) a.setAttribute("aria-current", "page");
       parent.appendChild(a);
@@ -210,9 +217,9 @@
     top.forEach(function (p) { link(p, host); });
     names.forEach(function (g, i) {
       var items = sortPages(groups[g]), here = items.some(function (p) { return p.path === cur; });
-      var isOpen = here || open[g] === true;
-      var wrap = el("div", { "class": "vn-group" + (isOpen ? " vn-open" : "") });
-      var btn = el("button", { type: "button", "class": "vn-group-btn", "aria-expanded": String(isOpen), "aria-controls": "vn-sub-" + i });
+      var isOpen = here || remembered[g] === true;
+      var wrap = el("div", { "class": "vn-group" + (isOpen ? " vn-open vn-current-group" : "") });
+      var btn = el("button", { type: "button", "class": "vn-group-btn", title: g, "aria-label": g, "aria-expanded": String(isOpen), "aria-controls": "vn-sub-" + i });
       btn.appendChild(labelled(g, (CONFIG.navIcons || {})[g] || DEFAULT_ICONS[g]));
       btn.appendChild(el("span", { "class": "vn-chev", "aria-hidden": "true" }, "\u25B8"));
       var sub = el("div", { "class": "vn-sub", id: "vn-sub-" + i, role: "group", "aria-label": g });
@@ -224,35 +231,62 @@
       });
       order.forEach(function (it, k) {
         if (it.page) { link(it.page, sub); return; }
-        var f = it.folder, fkey = g + "/" + f.name, fhere = f.pages.some(function (p) { return p.path === cur; }), fopen = fhere || open[fkey] === true;
+        var f = it.folder, fhere = f.pages.some(function (p) { return p.path === cur; }), fopen = fhere || remembered[g + "/" + f.name] === true;
         var fw = el("div", { "class": "vn-group vn-folder" + (fopen ? " vn-open" : "") });
-        var fb = el("button", { type: "button", "class": "vn-group-btn", "aria-expanded": String(fopen), "aria-controls": "vn-sub-" + i + "-" + k });
+        var fb = el("button", { type: "button", "class": "vn-group-btn", title: f.name, "aria-label": f.name, "aria-expanded": String(fopen), "aria-controls": "vn-sub-" + i + "-" + k });
         fb.appendChild(labelled(f.name, (CONFIG.navIcons || {})[f.name] || DEFAULT_ICONS[f.name]));
         fb.appendChild(el("span", { "class": "vn-chev", "aria-hidden": "true" }, "▸"));
         var fs = el("div", { "class": "vn-sub", id: "vn-sub-" + i + "-" + k, role: "group", "aria-label": f.name });
         f.pages.forEach(function (p) { link(p, fs); });
         fb.addEventListener("click", function () {
-          var on = fw.classList.toggle("vn-open");
-          fb.setAttribute("aria-expanded", String(on));
-          var st = store("nav.open") || {}; st[fkey] = on; store("nav.open", st);
+          var on = !fw.classList.contains("vn-open");
+          if (CONFIG.accordionNav && on) closeSiblings(fw, sub);
+          if (!CONFIG.accordionNav) { remembered[g + "/" + f.name] = on; store("nav.open", remembered); }
+          setOpen(fw, fb, on);
         });
         fw.appendChild(fb); fw.appendChild(fs); sub.appendChild(fw);
       });
       btn.addEventListener("click", function () {
-        var now = wrap.classList.toggle("vn-open");
-        btn.setAttribute("aria-expanded", String(now));
-        var st = store("nav.open") || {}; st[g] = now; store("nav.open", st);
+        var now = !wrap.classList.contains("vn-open");
+        if (CONFIG.accordionNav && now) closeSiblings(wrap, host);
+        if (!CONFIG.accordionNav) { remembered[g] = now; store("nav.open", remembered); }
+        setOpen(wrap, btn, now);
       });
       wrap.appendChild(btn); wrap.appendChild(sub); host.appendChild(wrap);
     });
 
-    /* phone: the sidebar is a drawer */
     var shellEl = document.getElementById("vn-shell"), menu = document.getElementById("vn-menu");
+    var head = shellEl && shellEl.querySelector(".vn-side-head");
+    if (head) {
+      var toggle = el("button", { type: "button", "class": "vn-icon vn-rail-toggle", "aria-controls": "vn-nav" });
+      var glyph = el("span", { "aria-hidden": "true" });
+      toggle.appendChild(glyph);
+      head.appendChild(toggle);
+      function setRail(on) {
+        var label = on ? "Expand sidebar" : "Collapse sidebar";
+        shellEl.classList.toggle("vn-rail", on);
+        glyph.textContent = on ? "›" : "‹";
+        toggle.title = label;
+        toggle.setAttribute("aria-label", label);
+        toggle.setAttribute("aria-expanded", String(!on));
+      }
+      setRail(store("nav.rail") === true);               // remembered per browser
+      toggle.addEventListener("click", function () {
+        var on = !shellEl.classList.contains("vn-rail");
+        setRail(on);
+        store("nav.rail", on);
+      });
+    }
+    var signOut = outEl && outEl.querySelector("button");
+    if (signOut) signOut.title = "Sign out";
+
+    /* phone: the sidebar is a drawer */
+    var side = document.getElementById("vn-side");
     function setDrawer(on) {
       if (!shellEl) return;
       shellEl.classList.toggle("vn-drawer-open", on);
       if (menu) menu.setAttribute("aria-expanded", String(on));
-      if (on) { var first = host.querySelector("a, button"); if (first) first.focus(); } else if (menu && document.activeElement && host.contains(document.activeElement)) menu.focus();
+      if (on) { var first = host.querySelector("a, button"); if (first) first.focus(); } else if (menu && side && side.contains(document.activeElement)) menu.focus();
     }
     if (menu) menu.addEventListener("click", function () { setDrawer(!shellEl.classList.contains("vn-drawer-open")); });
     var scrim = document.getElementById("vn-scrim"), close = document.getElementById("vn-close");
@@ -280,7 +314,7 @@
     function show() {
       box.innerHTML = "";
       if (!offer) return;
-      var b = el("button", { type: "button", "class": "vn-install-btn" }, "Install app");
+      var b = el("button", { type: "button", "class": "vn-install-btn", title: "Install app" }, "Install app");
       b.addEventListener("click", function () {
         var e2 = offer; offer = null; show();
         try { e2.prompt(); } catch (x) { /* already used */ }
