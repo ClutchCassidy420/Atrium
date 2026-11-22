@@ -19,7 +19,7 @@ trusted, matching certificate. If you reach the server by an address that is not
 MAIL_SMTP_TLS_SERVER_NAME to the name the certificate carries. There is no switch that turns verification off.
 
 An install can add routes of its own to the same /api/mail prefix (for example a server-wide block list). It imports the helpers below, and
-lists what it adds in FEATURES so the page can show the matching controls.
+lists what it adds in FEATURES so the page can show the matching controls, and adds fields to an opened message through READ_HOOKS.
 """
 from __future__ import annotations
 
@@ -53,6 +53,7 @@ PAGE = 30
 MAX_BODY = 6 * 1024 * 1024
 MAX_ATTACH_TOTAL = 20 * 1024 * 1024
 MAX_MESSAGE = 64 * 1024 * 1024          # a message bigger than this is refused with a clear error, never cut short
+READ_HOOKS: list = []                   # an install may add functions that take the parsed message and return extra fields for the page (for example block targets)
 FEATURES: set[str] = set()              # extra controls an install has added (for example "blocklist"); the page reads them from /status
 LOG = logging.getLogger(__name__)
 
@@ -368,10 +369,16 @@ def _read(folder: str, uid: int) -> dict:
         cleaned = clean_html(html)
         for cid, uri in inline.items():
             cleaned = cleaned.replace('src="cid:%s"' % cid, 'src="%s"' % uri)
-    return {"uid": uid, "folder": folder, "subject": _dec(msg.get("Subject")) or "(no subject)", "from": (_addr_list(msg.get("From")) or [{"name": "", "email": ""}])[0],
+    out = {"uid": uid, "folder": folder, "subject": _dec(msg.get("Subject")) or "(no subject)", "from": (_addr_list(msg.get("From")) or [{"name": "", "email": ""}])[0],
             "to": _addr_list(msg.get("To")), "cc": _addr_list(msg.get("Cc")), "reply_to": _addr_list(msg.get("Reply-To")), "date": _iso(msg.get("Date")),
             "message_id": str(msg.get("Message-ID") or ""), "references": str(msg.get("References") or ""),
             "text": text[:MAX_BODY], "html": cleaned, "blocked_images": "data-blocked-src" in cleaned, "attachments": atts}
+    for hook in READ_HOOKS:
+        try:
+            out.update(hook(msg) or {})
+        except Exception:                   # an install's extra field must never stop a message from opening
+            LOG.exception("mail read hook failed")
+    return out
 
 
 # ---------------------------------------------------------------- routes (blocking IMAP work runs in a thread)

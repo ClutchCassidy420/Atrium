@@ -516,9 +516,19 @@
     { id: "server", label: "Server", icon: "🖥️", note: "Install updates, reboot or shut down the machine this runs on. Owners only.", parts: [embed("server", "The server actions did not load.")], hostOnly: true }
   ];
 
+  function allSections() {      // an install can add sections: window.__APP_SETTINGS_SECTIONS__.push({ id, label, icon, note, parts: [Component], replaces: "model" })
+    var extra = (Array.isArray(window.__APP_SETTINGS_SECTIONS__) ? window.__APP_SETTINGS_SECTIONS__ : []).filter(function (x) {
+      return x && typeof x.id === "string" && typeof x.label === "string" && Array.isArray(x.parts);
+    });
+    var taken = SECTIONS.map(function (x) { return x.id; });
+    var added = extra.filter(function (x) { return taken.indexOf(x.id) < 0; });
+    var replaced = added.map(function (x) { return x.replaces; });
+    return SECTIONS.filter(function (x) { return replaced.indexOf(x.id) < 0; }).concat(added);
+  }
+
   function startSection() {
     var id = (window.location.hash || "").replace(/^#/, "");
-    return SECTIONS.some(function (x) { return x.id === id; }) ? id : SECTIONS[0].id;
+    return allSections().some(function (x) { return x.id === id; }) ? id : SECTIONS[0].id;
   }
 
   function Page() {
@@ -532,7 +542,7 @@
     useEffect(function () {
       fetchJSON("/api/host/status").then(function (j) { setHostOn(!!(j && j.enabled)); }).catch(function () { /* stays hidden */ });
     }, []);
-    var visible = SECTIONS.filter(function (x) { return !x.hostOnly || hostOn; });
+    var visible = allSections().filter(function (x) { return !x.hostOnly || hostOn; });
     function pick(id) { setCur(id); try { window.history.replaceState(null, "", "#" + id); } catch (x) { /* ignore */ } }
     var sec = visible.filter(function (x) { return x.id === cur; })[0] || visible[0];
     return h("div", { className: "ats-page" },
