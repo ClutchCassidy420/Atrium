@@ -72,6 +72,11 @@ An owner can choose, under Settings > Chat model, which model answers their chat
 
 An install that manages its own local models can set `chat_model.LOCAL_ROUTE` to a function `route(personal) -> dict` that supplies the run fields for its default model (it may raise `HTTPException`, for example 503 while a model server is switching).
 
+### Color themes
+
+Settings > Appearance lets every person (not only owners) pick a color theme: Abyss (the original look), Midnight, Ember, Forest, Rose, Graphite and High contrast. The choice is saved per person in the users file and put on `<html data-theme="...">` by the server, so the first paint already has it. A theme only changes the design tokens in `static/tokens.css` (`themes.css` has one block per theme, all dark); pages use `var(--color-primary)`, `rgba(var(--primary-rgb), .2)`, `var(--surface-deep)` and so on instead of hard-coded colors, which is how every page follows the theme. The `*-rgb` tokens are plain `r, g, b` triplets so a page can still set an alpha. An install's own `instance/theme.css` loads last and can still override any token for everyone. To add a theme, add its entry to `app/themes.py` and a block to `themes.css` with the same tokens; `tests/test_themes.py` checks that every theme is complete, that its triplets match its colors, that text meets WCAG AA contrast, and that no page stylesheet hard-codes a brand color again.
+
+
 ## The built-in pages
 
 - **Home** (`/`): the agent and the work on one screen. A greeting, an overall health ring (for roles that may see infrastructure), a single "Needs you" list (failed jobs, blocked cards, services down, backups, security), today's focus,

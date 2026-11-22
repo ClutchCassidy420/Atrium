@@ -2,7 +2,7 @@
 .atm-page {
   --atm-primary: var(--color-primary, #8b7bff);
   --atm-accent: var(--color-accent, #ff6fb5);
-  --atm-border: var(--color-border, rgba(160, 170, 255, 0.16));
+  --atm-border: var(--color-border, rgba(var(--line-rgb), 0.16));
   --atm-muted: var(--color-muted-foreground, #8b94b8);
   container-type: inline-size; width: 100%; box-sizing: border-box; max-width: 1400px; margin: 0 auto; padding: 1.2rem 1rem 2rem; display: flex; flex-direction: column; gap: 0.8rem;
 }
@@ -38,9 +38,9 @@
 .atm-ul { margin: 0 0 0.6rem; padding-left: 1.2rem; }
 .atm-quote { margin: 0 0 0.6rem; padding-left: 0.7rem; border-left: 3px solid var(--atm-primary); color: #cfd6f5; }
 .atm-pre { margin: 0 0 0.6rem; padding: 0.6rem 0.7rem; overflow-x: auto; font-size: 0.78rem; border-radius: 10px; background: rgba(0, 0, 0, 0.35); color: #cfe3ff; }
-.atm-code { padding: 0.08rem 0.35rem; font-size: 0.82em; color: #ff9fd2; border: 1px solid rgba(255, 111, 181, 0.28); border-radius: 6px; background: rgba(255, 111, 181, 0.12); }
+.atm-code { padding: 0.08rem 0.35rem; font-size: 0.82em; color: #ff9fd2; border: 1px solid rgba(var(--secondary-rgb), 0.28); border-radius: 6px; background: rgba(var(--secondary-rgb), 0.12); }
 .atm-link { color: var(--atm-accent); word-break: break-all; }
-.atm-wiki { display: inline-block; margin: 0 0.25rem 0.25rem 0; padding: 0.05rem 0.55rem; font: inherit; font-size: 0.8rem; color: #cfd6ff; cursor: pointer; border: 1px solid rgba(139, 123, 255, 0.45); border-radius: 999px; background: rgba(139, 123, 255, 0.14); }
+.atm-wiki { display: inline-block; margin: 0 0.25rem 0.25rem 0; padding: 0.05rem 0.55rem; font: inherit; font-size: 0.8rem; color: #cfd6ff; cursor: pointer; border: 1px solid rgba(var(--primary-rgb), 0.45); border-radius: 999px; background: rgba(var(--primary-rgb), 0.14); }
 .atm-wiki:hover { border-color: var(--atm-accent); }
 .atm-rel { margin-top: 0.8rem; }
 @media (max-width: 900px) {

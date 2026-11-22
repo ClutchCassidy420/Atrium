@@ -1,0 +1,40 @@
+/* Themes: ready-made palettes a person picks in Settings > Appearance. Each one only changes the values of the design tokens
+   (see tokens.css); no page changes its structure. "abyss" is the default and has no rules here: it is tokens.css as it is.
+   The page is told which theme with <html data-theme="...">. Every theme is dark. */
+
+html[data-theme="midnight"] {
+  --color-background: #060b16; --color-foreground: #e4ecff; --color-midground: #e4ecff; --color-card: rgba(12, 22, 44, 0.72); --color-muted: #0f1a30; --color-muted-foreground: #92a3c9;
+  --color-primary: #5b8cff; --color-primary-foreground: #060b16; --color-accent: #4fd1ff; --color-secondary: #8aa4ff; --color-ring: #4fd1ff; --color-border: rgba(120, 160, 255, 0.16);
+  --primary-rgb: 91, 140, 255; --accent-rgb: 79, 209, 255; --secondary-rgb: 138, 164, 255; --line-rgb: 120, 160, 255; --surface-deep: #0a1428; --stage-bg: #040a14;
+  --page-background: radial-gradient(1200px 700px at 12% -10%, rgba(70, 120, 255, 0.22), transparent 60%), radial-gradient(900px 600px at 105% 8%, rgba(79, 209, 255, 0.12), transparent 55%), var(--color-background);
+}
+html[data-theme="ember"] {
+  --color-background: #0e0806; --color-foreground: #ffece0; --color-midground: #ffece0; --color-card: rgba(40, 20, 14, 0.72); --color-muted: #1d110c; --color-muted-foreground: #c9a594;
+  --color-primary: #ff7a3d; --color-primary-foreground: #1a0a04; --color-accent: #ffc857; --color-secondary: #ff5c7a; --color-ring: #ffc857; --color-border: rgba(255, 170, 120, 0.16);
+  --primary-rgb: 255, 122, 61; --accent-rgb: 255, 200, 87; --secondary-rgb: 255, 92, 122; --line-rgb: 255, 170, 120; --surface-deep: #1c0f0a; --stage-bg: #0a0504;
+  --page-background: radial-gradient(1200px 700px at 12% -10%, rgba(255, 110, 50, 0.20), transparent 60%), radial-gradient(900px 600px at 105% 8%, rgba(255, 200, 87, 0.12), transparent 55%), var(--color-background);
+}
+html[data-theme="forest"] {
+  --color-background: #060d0b; --color-foreground: #e3f5ec; --color-midground: #e3f5ec; --color-card: rgba(12, 34, 28, 0.72); --color-muted: #0e1d18; --color-muted-foreground: #96bba9;
+  --color-primary: #34d399; --color-primary-foreground: #04120c; --color-accent: #a3e635; --color-secondary: #2dd4bf; --color-ring: #a3e635; --color-border: rgba(120, 220, 180, 0.16);
+  --primary-rgb: 52, 211, 153; --accent-rgb: 163, 230, 53; --secondary-rgb: 45, 212, 191; --line-rgb: 120, 220, 180; --surface-deep: #0a1c16; --stage-bg: #030a07;
+  --page-background: radial-gradient(1200px 700px at 12% -10%, rgba(52, 211, 153, 0.18), transparent 60%), radial-gradient(900px 600px at 105% 8%, rgba(163, 230, 53, 0.10), transparent 55%), var(--color-background);
+}
+html[data-theme="rose"] {
+  --color-background: #0e0711; --color-foreground: #ffe8f4; --color-midground: #ffe8f4; --color-card: rgba(40, 16, 40, 0.72); --color-muted: #1c0f20; --color-muted-foreground: #c9a0bd;
+  --color-primary: #f472b6; --color-primary-foreground: #1a0615; --color-accent: #c084fc; --color-secondary: #fb7185; --color-ring: #c084fc; --color-border: rgba(240, 150, 210, 0.16);
+  --primary-rgb: 244, 114, 182; --accent-rgb: 192, 132, 252; --secondary-rgb: 251, 113, 133; --line-rgb: 240, 150, 210; --surface-deep: #1c0e20; --stage-bg: #09040b;
+  --page-background: radial-gradient(1200px 700px at 12% -10%, rgba(244, 114, 182, 0.20), transparent 60%), radial-gradient(900px 600px at 105% 8%, rgba(192, 132, 252, 0.14), transparent 55%), var(--color-background);
+}
+html[data-theme="graphite"] {
+  --color-background: #0b0c0f; --color-foreground: #e8eaed; --color-midground: #e8eaed; --color-card: rgba(26, 28, 34, 0.78); --color-muted: #15171c; --color-muted-foreground: #9aa1ad;
+  --color-primary: #aab4c3; --color-primary-foreground: #0b0c0f; --color-accent: #7dd3fc; --color-secondary: #c4b5fd; --color-ring: #7dd3fc; --color-border: rgba(190, 200, 215, 0.14);
+  --primary-rgb: 170, 180, 195; --accent-rgb: 125, 211, 252; --secondary-rgb: 196, 181, 253; --line-rgb: 190, 200, 215; --surface-deep: #14161b; --stage-bg: #07080a;
+  --page-background: var(--color-background);
+}
+html[data-theme="contrast"] {
+  --color-background: #000000; --color-foreground: #ffffff; --color-midground: #ffffff; --color-card: rgba(18, 18, 18, 0.92); --color-muted: #111111; --color-muted-foreground: #d4d4d4;
+  --color-primary: #ffd400; --color-primary-foreground: #000000; --color-accent: #00e5ff; --color-secondary: #ff66ff; --color-ring: #ffd400; --color-border: rgba(255, 255, 255, 0.55);
+  --primary-rgb: 255, 212, 0; --accent-rgb: 0, 229, 255; --secondary-rgb: 255, 102, 255; --line-rgb: 255, 255, 255; --surface-deep: #0c0c0c; --stage-bg: #000000;
+  --page-background: var(--color-background);
+}

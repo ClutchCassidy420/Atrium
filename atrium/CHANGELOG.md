@@ -14,6 +14,8 @@
 - **Your own chat model** (owners, Settings > Chat model): pick the install's default or a model from a connected cloud provider, per person, locked
   for that person's chats and Home ask box, with an explicit yes before chat text goes to a cloud provider. Also fixes the Home ask box, which
   treated Hermes' normal `202 Accepted` answer to a started run as a failure. Tests: `tests/test_chat_model.py`.
+- **Color themes** (Settings > Appearance, everyone): seven dark palettes, saved per person and applied on first paint. Page stylesheets now use the
+  design tokens instead of hard-coded brand colors (a mechanical, reversible swap; the default look is unchanged). Tests: `tests/test_themes.py`.
 
 ## 1.0.1 (license change)
 
