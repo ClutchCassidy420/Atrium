@@ -1524,4 +1524,6 @@
 
   window.__AVATARS__ = { Orb: Orb, THEMES: THEMES, BOW_COLORS: BOW_COLORS, TIE_COLORS: TIE_COLORS, HAIR_COLORS: HAIR_COLORS, EYE_COLORS: EYE_COLORS,
     Galaxy: Galaxy, LOOK_DEFAULT: LOOK_DEFAULT, LOOK_PRESETS: LOOK_PRESETS, mergeLook: mergeLook, getLook: getLook, setLook: setLook, resetLook: resetLook };
+  // the chat page draws the character beside a conversation from window.__ATRIUM_UI__; an install that supplies its own Orb keeps it
+  window.__ATRIUM_UI__ = Object.assign({ Orb: Orb }, window.__ATRIUM_UI__ || {});
 })();

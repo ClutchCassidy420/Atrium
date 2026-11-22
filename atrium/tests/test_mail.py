@@ -324,3 +324,26 @@ def test_email_pages_and_routes_appear_only_when_configured(make, tmp_path):
     login(both)
     assert "mail-inbox" in both.get("/shell-config.js").text
     assert both.get("/api/mail/status").status_code == 200
+
+
+# ---------------------------------------------------------------- read hooks an install can add
+
+def test_an_install_can_add_fields_to_an_opened_message(monkeypatch, mailcfg):
+    use(monkeypatch, Box(raw=b"From: a@x.com\r\nSubject: hi\r\n\r\nbody"))
+    hook = lambda msg: {"extra": str(msg["Subject"])}
+    mb.READ_HOOKS.append(hook)
+    try:
+        assert mb._read("INBOX", 7)["extra"] == "hi"
+    finally:
+        mb.READ_HOOKS.remove(hook)
+    assert "extra" not in mb._read("INBOX", 7)
+
+
+def test_a_failing_read_hook_never_stops_a_message_from_opening(monkeypatch, mailcfg):
+    use(monkeypatch, Box(raw=b"From: a@x.com\r\nSubject: hi\r\n\r\nbody"))
+    boom = lambda msg: 1 / 0
+    mb.READ_HOOKS.append(boom)
+    try:
+        assert mb._read("INBOX", 7)["subject"] == "hi"
+    finally:
+        mb.READ_HOOKS.remove(boom)
