@@ -146,7 +146,10 @@
   /* The next week from the connected calendar. Shows nothing if no calendar is connected. */
   function Upcoming() {
     var a = useState(null), evs = a[0], set = a[1];
+    // the calendar page only exists when a Nextcloud is configured; without one there is nothing to ask for
+    var enabled = (UI.config().pages || []).some(function (pg) { return pg.id === "calendar"; });
     useEffect(function () {
+      if (!enabled) { set(false); return undefined; }
       var live = true, t0 = new Date(), t1 = new Date(t0.getTime() + 7 * 86400000);
       function load() {
         SDK.fetchJSON("/api/nextcloud/events?start=" + encodeURIComponent(new Date(t0.getFullYear(), t0.getMonth(), t0.getDate()).toISOString()) + "&end=" + encodeURIComponent(t1.toISOString()))
@@ -155,7 +158,7 @@
       load();
       var timer = setInterval(load, 300000);
       return function () { live = false; clearInterval(timer); };
-    }, []);
+    }, [enabled]);
     if (evs === false) return null;
     function dayOf(e) { return e.all_day ? new Date(+e.start.slice(0, 4), +e.start.slice(5, 7) - 1, +e.start.slice(8, 10)) : new Date(e.start); }
     var now = Date.now(), list = (evs || []).filter(function (e) { return e.all_day || new Date(e.end).getTime() >= now; }).slice(0, 6);
