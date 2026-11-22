@@ -401,6 +401,40 @@
               }))));
   }
 
+  function ChatModel() {
+    var status = useState(""), busy = useState(false);
+    useEffect(function () {
+      fetchJSON(API + "/model").then(function (r) {
+        status[1](r.model ? "Current model: " + r.model : "Choose your first model.");
+      }).catch(function (e) { status[1](errText(e)); });
+    }, []);
+    function save(event) {
+      event.preventDefault();
+      var form = event.currentTarget;
+      var body = Object.fromEntries(new FormData(form));
+      form.elements.api_key.value = "";
+      busy[1](true);
+      post(API + "/model", body).then(function (r) {
+        if (!r.confirm_required) return r;
+        if (!window.confirm("The runtime flagged this model as potentially expensive. Use it for new chats?")) return {};
+        body.confirm = true;
+        return post(API + "/model", body);
+      }).then(function (r) {
+        status[1](r.ok ? "Saved " + body.model + ". Start a new chat to use it." : "Model selection cancelled.");
+      }).catch(function (e) { status[1](errText(e)); }).finally(function () { busy[1](false); });
+    }
+    function field(name, label, type, required) {
+      return h("label", { className: "ats-connection-field" }, label,
+        h("input", { className: "ats-input", name: name, type: type, required: required, autoComplete: "off" }));
+    }
+    return h("form", { className: "ats-card", onSubmit: save },
+      field("base_url", "API base URL (include /v1 if required)", "url", true),
+      field("model", "Model ID", "text", true),
+      field("api_key", "API key (if required)", "password", false),
+      h("button", { className: "ats-btn", disabled: busy[0], type: "submit" }, busy[0] ? "Saving…" : "Use model"),
+      h("p", { role: "status", className: "ats-note" }, status[0]));
+  }
+
   var SECTIONS = [
     { id: "general", label: "General", icon: "🛠️", note: "Your agent's name and voice, and shortcuts to the other pages.", parts: [AgentCard, VoiceCard, Shortcuts, Account] },
     { id: "notifications", label: "Notifications", icon: "🔔", note: "What is allowed to buzz your phone, and which devices get it.", parts: [Notifications, Devices] },
@@ -409,6 +443,7 @@
     { id: "avatar", label: "Avatar", icon: "🎨", note: "Pick and customise how the agent looks.", parts: [embed("avatar", "The avatar editor did not load.")] },
     { id: "memory", label: "Memory", icon: "🧠", note: "The agent's notes as a graph: every note a dot, every link a line. Read only.", parts: [embed("memory", "The memory view did not load.")] },
     { id: "engine", label: "Cloud use", icon: "☁️", note: "Which engine answers chats from the app, and what the cloud has used.", parts: [Cloud] },
+    { id: "model", label: "Chat model", icon: "🧠", note: "Choose an OpenAI-compatible endpoint for new chats.", parts: [ChatModel] },
     { id: "connections", label: "Connections", icon: "🔌", note: "Connect external tools to Hermes.", parts: [Connections] },
     { id: "server", label: "Server", icon: "🖥️", note: "Install updates, reboot or shut down the machine this runs on. Owners only.", parts: [embed("server", "The server actions did not load.")], hostOnly: true }
   ];
