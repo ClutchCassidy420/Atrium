@@ -23,6 +23,7 @@ from hermes import Hermes
 from overview import Overview
 from chatmount import PREFIX as CHAT_PREFIX, mount_chat
 from code_backend import mount_code
+import chat_model
 from pages import load_pages
 from pagesmount import mount_owner_pages
 from users import UserStore
@@ -50,6 +51,7 @@ def make_app(cfg: configmod.Config | None = None, hermes: Hermes | None = None, 
     sessions = Sessions(cfg.data_dir / "sessions.json")
     overview = Overview(hermes, cfg.hermes_data_dir, cfg.deck_dir, cfg.systems)
     throttle = Throttle(cfg.max_fails, cfg.lock_minutes * 60)
+    chat_model.configure(cfg.data_dir)
     configured = {"mail": bool(cfg.mail_address and cfg.mail_token and cfg.mail_imap_host),
                   "nextcloud": bool(cfg.nextcloud_url and cfg.nextcloud_user and cfg.nextcloud_password)}
     pages = [p for p in load_pages(HERE / "pages.json", cfg.instance_dir, cfg.pages_disabled) if not p["requires"] or configured[p["requires"]]]
@@ -333,9 +335,11 @@ def make_app(cfg: configmod.Config | None = None, hermes: Hermes | None = None, 
             status, run = await hermes.api_call("GET", "/v1/runs/" + prev["id"])
             if status == 200 and run and run.get("status") not in TERMINAL:
                 return JSONResponse({"detail": "%s is still working on your last question." % cfg.agent_name}, status_code=409)
-        status, run = await hermes.api_call("POST", "/v1/runs", {"input": message, "session_id": "ask-" + who["user"]})
+        payload = {"input": message, "session_id": "ask-" + who["user"]}
+        payload.update(chat_model.override(who["user"]))
+        status, run = await hermes.api_call("POST", "/v1/runs", payload)
         rid = run.get("run_id") if isinstance(run, dict) else None
-        if status not in (200, 201) or not isinstance(rid, str) or not RUN_ID.match(rid):
+        if status not in (200, 201, 202) or not isinstance(rid, str) or not RUN_ID.match(rid):
             return JSONResponse({"detail": "Could not reach %s right now." % cfg.agent_name}, status_code=502)
         last_run[who["user"]] = {"id": rid, "at": time.monotonic()}
         owner_of[rid] = who["user"]

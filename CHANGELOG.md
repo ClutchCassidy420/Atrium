@@ -11,6 +11,9 @@
   second card or project, and Approve everything records why it stopped. Sidecar: unique restore-point names, verified rewind, terminal access
   re-checked while open, and the agent's browser is reached through an authenticated entry point (`CDP_TOKEN`) instead of an open port.
   Tests: `tests/test_sidecar.py` plus additions to `tests/test_code.py` and `tests/test_pipeline.py`.
+- **Your own chat model** (owners, Settings > Chat model): pick the install's default or a model from a connected cloud provider, per person, locked
+  for that person's chats and Home ask box, with an explicit yes before chat text goes to a cloud provider. Also fixes the Home ask box, which
+  treated Hermes' normal `202 Accepted` answer to a started run as a failure. Tests: `tests/test_chat_model.py`.
 
 ## 1.0.1 (license change)
 
