@@ -354,7 +354,7 @@
       h("div", { role: "status", className: "ats-note" }, busy ? "Working…" : message),
       h("div", { className: "ats-card" },
         h("h3", { className: "ats-h" }, "Installed connections"),
-        h("p", { className: "ats-note" }, "Start a fresh chat after Hermes reloads its connections. The gateway may take a moment to pick up changes."),
+        h("p", { className: "ats-note" }, "Test a connection to see which tools its server offers."),
         h("button", { type: "button", className: "ats-btn", disabled: busy, onClick: function () {
           setBusy(true);
           setMessage("");
@@ -381,7 +381,7 @@
                       if (window.confirm("Remove " + server.name + "? Hermes may retain saved credentials.")) run(server.name, "", "DELETE", null, server.name + " removed.");
                     } }, "Remove")),
                   result && result.name === server.name && h("div", { role: "status" },
-                    h("p", { className: "ats-note" }, result.tools.length ? "Tools discovered by Hermes" : "Connection succeeded. Hermes discovered no tools."),
+                    h("p", { className: "ats-note" }, result.tools.length ? "Tools discovered. If a new chat cannot find one yet, wait about a minute and start another chat." : "Connection succeeded. Hermes discovered no tools."),
                     result.tools.length > 0 && h("ul", null, result.tools.map(function (tool, index) {
                       return h("li", { key: index }, tool);
                     }))));
