@@ -16,6 +16,14 @@
   --color-warning: #ffc857;
   --color-border: rgba(160, 170, 255, 0.14);
   --color-ring: #3dd6f5;
+  --color-secondary: #ff6fb5;
+  /* the same brand colors as plain "r, g, b" triplets, so pages can write rgba(var(--primary-rgb), .2) and still follow the theme */
+  --primary-rgb: 139, 123, 255;
+  --accent-rgb: 61, 214, 245;
+  --secondary-rgb: 255, 111, 181;
+  --line-rgb: 160, 170, 255;
+  --surface-deep: #0d1226;
+  --stage-bg: #05070f;
   --radius: 14px;
   --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --page-background:

@@ -24,6 +24,7 @@ from overview import Overview
 from chatmount import PREFIX as CHAT_PREFIX, mount_chat
 from code_backend import mount_code
 import chat_model
+import themes as themesmod
 from pages import load_pages
 from pagesmount import mount_owner_pages
 from users import UserStore
@@ -82,14 +83,20 @@ def make_app(cfg: configmod.Config | None = None, hermes: Hermes | None = None, 
             return True
         return urlsplit(origin).netloc == request.headers.get("host", "")
 
-    def page_doc(body: str, title: str, status: int = 200, shell: bool = False) -> HTMLResponse:
-        doc = ('<!doctype html><html lang="en"><head><meta charset="utf-8">'
+    def page_doc(body: str, title: str, status: int = 200, shell: bool = False, theme: str = "") -> HTMLResponse:
+        # the person's chosen color theme goes on <html> so the very first paint already has it (no flash of the default look)
+        attr = ' data-theme="%s"' % html.escape(theme) if theme and theme != themesmod.DEFAULT else ""
+        doc = ('<!doctype html><html lang="en"%s><head><meta charset="utf-8">'
                '<meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="dark">'
-               '<title>%s</title><link rel="stylesheet" href="/static/tokens.css"><link rel="stylesheet" href="/static/app.css">'
+               '<title>%s</title><link rel="stylesheet" href="/static/tokens.css"><link rel="stylesheet" href="/static/themes.css">'
+               '<link rel="stylesheet" href="/static/app.css">'
                '%s<link rel="stylesheet" href="/instance/theme.css"></head><body class="%s">%s</body></html>'
-               % (html.escape(title), '<link rel="stylesheet" href="/static/shell.css">' if shell else "",
+               % (attr, html.escape(title), '<link rel="stylesheet" href="/static/shell.css">' if shell else "",
                   "vn" if shell else "", body))
         return HTMLResponse(doc, status_code=status)
+
+    def theme_of(who: dict) -> str:
+        return themesmod.clean((users.get(who["user"]) or {}).get("theme")) or themesmod.DEFAULT
 
     def login_page(error: str = "", status: int = 200) -> HTMLResponse:
         err = '<p class="err" role="alert">%s</p>' % html.escape(error) if error else ""
@@ -122,7 +129,7 @@ def make_app(cfg: configmod.Config | None = None, hermes: Hermes | None = None, 
                 '<script src="/static/vendor/react-dom.production.min.js"></script>'
                 '<script src="/shell-config.js"></script><script src="/static/shim.js"></script>'
                 % (brand, html.escape(who["user"]), name, brand))
-        return page_doc(body, cfg.brand, shell=True)
+        return page_doc(body, cfg.brand, shell=True, theme=theme_of(who))
 
     def allowed_pages(who: dict) -> list[dict]:
         return [p for p in pages if cfg.allows(who["role"], p["permission"])]
@@ -272,6 +279,33 @@ def make_app(cfg: configmod.Config | None = None, hermes: Hermes | None = None, 
         tmp.write_text(json.dumps(look), encoding="utf-8")
         tmp.replace(path)
         return {"ok": True}
+
+    @app.get("/api/themes")
+    async def themes_get(request: Request):
+        """The color themes on offer and the one this person has picked."""
+        who = current(request)
+        denied = deny(who, "use")
+        if denied:
+            return denied
+        return {"themes": themesmod.THEMES, "current": theme_of(who), "default": themesmod.DEFAULT}
+
+    @app.put("/api/theme")
+    async def theme_put(request: Request):
+        """Save this person's own theme (everyone may choose theirs; it changes nothing for anyone else)."""
+        who = current(request)
+        denied = deny(who, "use")
+        if denied:
+            return denied
+        if not same_origin(request):
+            return PlainTextResponse("Bad origin.", status_code=403)
+        try:
+            theme = themesmod.clean((await request.json()).get("theme"))
+        except Exception:
+            theme = None
+        if theme is None:
+            return JSONResponse({"detail": "That theme does not exist."}, status_code=422)
+        users.set_theme(who["user"], theme)
+        return {"ok": True, "current": theme}
 
     @app.get("/api/health")
     async def health(request: Request):

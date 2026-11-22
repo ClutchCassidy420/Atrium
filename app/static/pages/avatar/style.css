@@ -1,5 +1,5 @@
 /* Avatar page: Settings layout plus a preview pane */
-.av-page { --av-border: var(--color-border, rgba(160,170,255,.16)); --av-muted: var(--color-muted-foreground, #8b94b8); --av-accent: var(--color-accent, #ff6fb5);
+.av-page { --av-border: var(--color-border, rgba(var(--line-rgb),.16)); --av-muted: var(--color-muted-foreground, #8b94b8); --av-accent: var(--color-accent, #ff6fb5);
   max-width: 1200px; margin: 0 auto; padding: 1.2rem 1rem 3rem; display: flex; flex-direction: column; gap: 1rem; }
 .av-title { font-size: 1.6rem; font-weight: 800; letter-spacing: -.01em; }
 .av-layout { display: grid; grid-template-columns: 200px minmax(0,1fr) 340px; gap: 1.5rem; align-items: start; }
@@ -25,7 +25,7 @@
 .av-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
 .av-range { width: min(320px, 100%); }
 .av-preview { position: sticky; top: 1rem; display: flex; flex-direction: column; align-items: center; gap: .8rem; padding: 1rem; border: 1px solid var(--av-border); border-radius: 16px;
-  background: radial-gradient(circle at 50% 35%, #14233a, #05070f 75%); }
+  background: radial-gradient(circle at 50% 35%, #14233a, var(--stage-bg) 75%); }
 .av-stage { position: relative; width: 100%; max-width: 420px; height: 300px; overflow: hidden; border-radius: 12px; }
 .av-stage .atl-galaxy { position: absolute; left: 0; top: 0; }
 .av-stage .atl-orb { position: absolute; left: 50%; top: 0; height: 100%; width: auto; aspect-ratio: 240 / 300; }

@@ -89,6 +89,15 @@ class UserStore:
             users[username.lower()]["name"] = (name or "").strip()[:40]
             self._save(users)
 
+    def set_theme(self, username: str, theme: str) -> None:
+        """The color theme this person picked (an id from themes.THEMES; the caller validates it)."""
+        with self.lock:
+            users = self._load()
+            if username.lower() not in users:
+                raise UserError("No such user.")
+            users[username.lower()]["theme"] = theme
+            self._save(users)
+
     def set_role(self, username: str, role: str) -> None:
         with self.lock:
             users = self._load()

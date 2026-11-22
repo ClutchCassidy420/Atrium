@@ -270,6 +270,38 @@
         h("a", { className: "ats-btn", href: "/agent-workflows" }, "Workflows")));
   }
 
+  /* ---------- appearance: the color theme (saved per person, applied at once) ---------- */
+
+  function Appearance() {
+    var t_ = useState(null), data = t_[0], setData = t_[1];
+    var m_ = useState(""), msg = m_[0], setMsg = m_[1];
+    useEffect(function () { fetchJSON("/api/themes").then(setData).catch(function (e) { setMsg(errText(e)); }); }, []);
+    function apply(id, dflt) {
+      var root = document.documentElement;
+      if (!id || id === dflt) root.removeAttribute("data-theme"); else root.setAttribute("data-theme", id);
+    }
+    function pick(id) {
+      if (!data || id === data.current) return;
+      var before = data.current;
+      apply(id, data.default); setData(Object.assign({}, data, { current: id })); setMsg("");
+      fetchJSON("/api/theme", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ theme: id }) })
+        .then(function () { setMsg("Saved. This is your theme on every device you sign in on."); })
+        .catch(function (e) { apply(before, data.default); setData(Object.assign({}, data, { current: before })); setMsg(errText(e)); });
+    }
+    if (!data) return h("div", { className: "ats-card" }, msg ? h("div", { className: "ats-err" }, msg) : h("div", { className: "ats-note" }, "Loading themes…"));
+    return h("div", { className: "ats-card" },
+      h("div", { className: "ats-h" }, "Color theme"),
+      h("div", { className: "ats-note" }, "Pick the colors you like. It changes how everything looks for you and for nobody else."),
+      h("div", { className: "ats-themes", role: "radiogroup", "aria-label": "Color theme" }, data.themes.map(function (th) {
+        var on = th.id === data.current;
+        return h("button", { key: th.id, type: "button", role: "radio", "aria-checked": on ? "true" : "false", className: "ats-theme" + (on ? " ats-theme-on" : ""), onClick: function () { pick(th.id); } },
+          h("span", { className: "ats-swatch", "aria-hidden": "true" }, th.swatch.map(function (c, i) { return h("i", { key: i, style: { background: c } }); })),
+          h("span", { className: "ats-theme-name" }, th.label, on ? h("em", null, "In use") : null),
+          h("span", { className: "ats-theme-note" }, th.note));
+      })),
+      msg ? h("div", { className: /^Saved/.test(msg) ? "ats-msg" : "ats-err", role: "status" }, msg) : null);
+  }
+
   function embed(key, missing) {      // another framework page shown inside a Settings section
     return function Embedded() {
       var C = window.__APP_SUBPAGES__ && window.__APP_SUBPAGES__[key];
@@ -472,6 +504,7 @@
 
   var SECTIONS = [
     { id: "general", label: "General", icon: "🛠️", note: "Your agent's name and voice, and shortcuts to the other pages.", parts: [AgentCard, VoiceCard, Shortcuts, Account] },
+    { id: "appearance", label: "Appearance", icon: "🌈", note: "The colors of the app. Your choice follows you to every device.", parts: [Appearance] },
     { id: "notifications", label: "Notifications", icon: "🔔", note: "What is allowed to buzz your phone, and which devices get it.", parts: [Notifications, Devices] },
     { id: "schedule", label: "Schedule", icon: "⏰", note: "When each of the agent's jobs runs.", parts: [Schedule] },
     { id: "persona", label: "Persona", icon: "🎭", note: "Who the agent is and the rules she works by, with every earlier version kept.", parts: [embed("persona", "The persona editor did not load.")] },
@@ -507,7 +540,7 @@
       h("div", { className: "ats-layout" },
         h("nav", { className: "ats-nav", "aria-label": "Settings sections" }, visible.map(function (x) {
           return h("button", { key: x.id, type: "button", className: "ats-navitem" + (x.id === sec.id ? " ats-current" : ""), "aria-current": x.id === sec.id ? "page" : null, onClick: function () { pick(x.id); } },
-            h("span", { className: "ats-navicon", "aria-hidden": "true", style: { "--h": ({ general: 215, notifications: 40, schedule: 150, persona: 320, avatar: 275, memory: 185, engine: 205, server: 25 })[x.id] || 260 } }, x.icon), x.label);
+            h("span", { className: "ats-navicon", "aria-hidden": "true", style: { "--h": ({ general: 215, appearance: 300, notifications: 40, schedule: 150, persona: 320, avatar: 275, memory: 185, engine: 205, server: 25 })[x.id] || 260 } }, x.icon), x.label);
         })),
         h("section", { className: "ats-panel", key: sec.id },
           h("h2", { className: "ats-panel-h" }, sec.label),

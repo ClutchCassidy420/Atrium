@@ -1,5 +1,5 @@
 /* Kanban */
-.kb-page { --kb-border: var(--color-border, rgba(160,170,255,.16)); --kb-muted: var(--color-muted-foreground, #8b94b8); --kb-accent: var(--color-accent, #ff6fb5);
+.kb-page { --kb-border: var(--color-border, rgba(var(--line-rgb),.16)); --kb-muted: var(--color-muted-foreground, #8b94b8); --kb-accent: var(--color-accent, #ff6fb5);
   max-width: 1900px; margin: 0 auto; padding: .8rem; display: flex; flex-direction: column; gap: .7rem; }
 .kb-head { display: flex; flex-wrap: wrap; gap: .6rem 1rem; align-items: flex-end; justify-content: space-between; }
 .kb-h1 { margin: 0; font-size: 1.5rem; }
@@ -8,7 +8,7 @@
 .kb-tools { flex-wrap: wrap; }
 .kb-wrap { flex-wrap: wrap; }
 .kb-btn, .kb-select, .kb-input { padding: .42rem .7rem; font: inherit; font-size: .84rem; color: inherit; border: 1px solid var(--kb-border); border-radius: 9px; background: rgba(255,255,255,.05); }
-.kb-select { color-scheme: dark; background: #0d1226; max-width: 100%; }
+.kb-select { color-scheme: dark; background: var(--surface-deep); max-width: 100%; }
 .kb-btn { cursor: pointer; font-weight: 600; }
 .kb-btn:hover:not(:disabled) { border-color: var(--kb-accent); }
 .kb-btn:disabled { opacity: .5; cursor: default; }
@@ -57,7 +57,7 @@
 .kb-label { font-size: .72rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--kb-muted); margin-bottom: .25rem; }
 .kb-lab { font-size: .8rem; color: var(--kb-muted); display: flex; align-items: center; gap: .35rem; }
 .kb-edit { display: flex; flex-direction: column; gap: .5rem; }
-.kb-confirm { padding: .65rem .75rem; border: 1px solid var(--kb-accent); border-radius: 11px; background: rgba(255,111,181,.08); }
+.kb-confirm { padding: .65rem .75rem; border: 1px solid var(--kb-accent); border-radius: 11px; background: rgba(var(--secondary-rgb),.08); }
 .kb-confirm p { margin: 0 0 .5rem; font-size: .88rem; }
 .kb-log { max-height: 16rem; overflow: auto; margin: 0; padding: .6rem; font-size: .76rem; border-radius: 9px; background: rgba(0,0,0,.35); white-space: pre-wrap; overflow-wrap: anywhere; }
 .kb-list { margin: 0; padding-left: 1.1rem; font-size: .82rem; }
