@@ -324,3 +324,45 @@ def test_email_pages_and_routes_appear_only_when_configured(make, tmp_path):
     login(both)
     assert "mail-inbox" in both.get("/shell-config.js").text
     assert both.get("/api/mail/status").status_code == 200
+
+
+# ---------------------------------------------------------------- capabilities after sign-in (a front-end proxy lists fewer before it)
+
+def test_capabilities_are_asked_again_after_sign_in_because_a_proxy_lists_fewer_before(mailcfg, monkeypatch):
+    class Proxy:
+        capabilities = ("IMAP4REV1",)             # what the greeting said: no MOVE, no UIDPLUS
+
+        def __init__(self, *a, **k):
+            pass
+
+        def login(self, user, token):
+            return "OK", []
+
+        def _get_capabilities(self):
+            self.capabilities = ("IMAP4REV1", "MOVE", "UIDPLUS")
+
+        def logout(self):
+            return "BYE", []
+    monkeypatch.setattr(mb, "_VerifiedIMAP4SSL", Proxy)
+    with mb._imap() as m:
+        assert {"MOVE", "UIDPLUS"} <= mb._caps(m)
+
+
+def test_a_server_that_cannot_report_capabilities_again_keeps_the_greeting_ones(mailcfg, monkeypatch):
+    class Quiet:
+        capabilities = ("IMAP4REV1", "MOVE")
+
+        def __init__(self, *a, **k):
+            pass
+
+        def login(self, user, token):
+            return "OK", []
+
+        def _get_capabilities(self):
+            raise imaplib.IMAP4.error("no")
+
+        def logout(self):
+            return "BYE", []
+    monkeypatch.setattr(mb, "_VerifiedIMAP4SSL", Quiet)
+    with mb._imap() as m:
+        assert mb._caps(m) == {"IMAP4REV1", "MOVE"}

@@ -105,6 +105,15 @@ class _VerifiedSMTPSSL(smtplib.SMTP_SSL):
             raise
 
 
+def _refresh_caps(m) -> None:
+    """A front-end proxy (Mailu's) lists fewer capabilities before sign-in than the mail store behind it does after, so ask again once signed in.
+    Without this, MOVE and UIDPLUS look missing and moving or deleting a message is refused."""
+    try:
+        m._get_capabilities()
+    except (imaplib.IMAP4.error, OSError, AttributeError, ValueError):
+        pass                                  # keep what the greeting said
+
+
 @contextmanager
 def _imap():
     try:
@@ -116,6 +125,7 @@ def _imap():
         )
         m._encoding = "utf-8"
         m.login(CFG.mail_address, CFG.mail_token)
+        _refresh_caps(m)
     except (imaplib.IMAP4.error, OSError, ValueError):
         raise HTTPException(status_code=502, detail="The mail server did not accept the sign-in.")
     try:
