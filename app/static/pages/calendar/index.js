@@ -72,7 +72,7 @@
         isNew && writable.length > 1 ? h("label", null, "Calendar", h("select", { className: "hm-select cal-wide", value: f.cal || writable[0].id, onChange: function (x) { set("cal", x.target.value); } }, writable.map(function (cl) { return h("option", { key: cl.id, value: cl.id }, cl.name); }))) : null,
         h("input", { className: "hm-input", placeholder: "Location", value: f.loc, disabled: readonly, maxLength: 300, onChange: function (x) { set("loc", x.target.value); } }),
         h("textarea", { className: "hm-textarea", placeholder: "Notes", rows: 3, value: f.desc, disabled: readonly, maxLength: 8000, onChange: function (x) { set("desc", x.target.value); } }),
-        msg ? h("p", { className: "hm-err", role: "alert" }, msg) : null,
+        msg ? h(UI.kit.Alert, { tone: "danger" }, msg) : null,
         h("div", { className: "cal-actions" },
           !isNew && !readonly ? h("button", { type: "button", className: "hm-btn hm-btn-ghost cal-del", disabled: busy, onClick: del }, "Delete") : null,
           h("span", { style: { flex: 1 } }),
@@ -99,7 +99,7 @@
       }, function (x) { if (live) setErr(errText(x)); });
       return function () { live = false; };
     }, [cur.y, cur.m, n]);
-    useEffect(function () { SDK.fetchJSON(API + "/status").then(setMeta, function (x) { setErr(errText(x)); }); }, []);
+    useEffect(function () { if (meta) return; SDK.fetchJSON(API + "/status").then(setMeta, function (x) { setErr(errText(x)); }); }, [n]);
 
     var cals = (meta && meta.calendars) || [];
     cals.forEach(function (cl, i) { if (!cl.color) cl.color = DEFAULT_COLORS[i % DEFAULT_COLORS.length]; });
@@ -115,7 +115,7 @@
     }
     function saved() { setModal(null); setN(n + 1); }
 
-    if (err && !meta && !events.length) return h("div", { className: "cal" }, h("h1", null, "Calendar"), h("p", { className: "hm-err" }, err), h("p", { className: "hm-sub" }, "If Nextcloud is not connected to this app yet, add its address and an app password to the app's private config."));
+    if (err && !meta && !events.length) return h("div", { className: "cal" }, h("h1", null, "Calendar"), h(UI.kit.Alert, { tone: "danger", title: "Could not load your calendar", action: h(UI.kit.Button, { size: "sm", onClick: function () { setErr(""); setN(n + 1); } }, "Try again") }, err), h("p", { className: "hm-sub" }, "If Nextcloud is not connected to this app yet, add its address and an app password to the app's private config."));
     var cells = [];
     for (var i = 0; i < 42; i++) {
       (function (day) {
@@ -144,7 +144,7 @@
         return h("button", { key: cl.id, type: "button", className: "cal-key" + (hidden[cl.id] ? " cal-off" : ""), style: { "--cc": cl.color }, "aria-pressed": String(!hidden[cl.id]),
           onClick: function () { var o = Object.assign({}, hidden); o[cl.id] = !o[cl.id]; setHidden(o); } }, h("i", null), cl.name);
       })) : null,
-      err ? h("p", { className: "hm-err", role: "alert" }, err) : null,
+      err ? h(UI.kit.Alert, { tone: "danger", onDismiss: function () { setErr(""); } }, err) : null,
       h("div", { className: "cal-layout" },
         h("div", { className: "hm-card cal-grid-card" },
           h("div", { className: "cal-head" }, DAYS.map(function (x) { return h("span", { key: x }, x); })),
@@ -156,7 +156,7 @@
               onKeyDown: function (x) { if (x.key === "Enter") setModal(ev); } },
               h("i", { className: "cal-bar" }), h("div", null, h("div", { className: "hm-item-t" }, ev.title),
                 h("div", { className: "hm-sub" }, ev.all_day ? "All day" : timeText(ev.s) + " – " + timeText(ev.e)), ev.location ? h("div", { className: "hm-sub" }, "📍 " + ev.location) : null));
-          })) : h("p", { className: "hm-empty" }, "Nothing on this day. Double-click a day, or press + Add."))),
+          })) : h(UI.kit.EmptyState, { icon: "📅", title: "Nothing on this day", description: "Double-click a day, or press + Add." }))),
       modal ? h(Modal, { event: modal, calendars: cals, onClose: function () { setModal(null); }, onSaved: saved }) : null);
   }
 
