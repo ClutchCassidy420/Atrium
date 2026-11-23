@@ -9,6 +9,8 @@ the framework's repository. See docs/FRAMEWORK.md.
 """
 from __future__ import annotations
 
+import re
+
 import json
 import os
 import tomllib
@@ -22,8 +24,30 @@ DEFAULT_ROLES = {
 }
 
 
+def clean_presets(raw) -> list:
+    """The look presets from instance.toml, or [] when they are not in the expected shape (a name and a small map of plain values)."""
+    if not isinstance(raw, list) or not 0 < len(raw) <= 40:
+        return []
+    out = []
+    for item in raw:
+        if not isinstance(item, dict) or set(item) - {"name", "look"} or not isinstance(item.get("name"), str) or not 0 < len(item["name"].strip()) <= 40:
+            return []
+        look = item.get("look")
+        if not isinstance(look, dict) or not look or len(look) > 24:
+            return []
+        for k, v in look.items():
+            if not isinstance(k, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,31}", k):
+                return []
+            if not (isinstance(v, bool) or (isinstance(v, (int, float)) and abs(v) < 1e6) or (isinstance(v, str) and len(v) <= 40)):
+                return []
+        out.append({"name": item["name"].strip(), "look": dict(look)})
+    return out
+
+
 @dataclass
 class Config:
+    avatar_presets: list = field(default_factory=list)       # extra looks for Settings > Avatar: [{"name": ..., "look": {...}}] from instance.toml
+    accordion_nav: bool = False           # sidebar sections behave as an accordion: opening one closes the others, and nothing is remembered
     brand: str = "Atrium"                 # shown in the title and the top bar
     agent_name: str = "Assistant"            # what the pages call the agent
     data_dir: Path = Path("/data")           # the app's own writable folder (users, sessions)
@@ -51,6 +75,21 @@ class Config:
     action_gate_url: str = ""                  # the approval service for proposed actions (optional)
     host_action_url: str = ""                  # the host helper for server actions: updates, reboot, shutdown (optional)
     host_action_key: str = ""                  # the shared key the helper expects
+    nextcloud_url: str = ""                    # Files and Calendar: where the app reaches Nextcloud (e.g. over a private network)
+    nextcloud_host: str = ""                   # the Host header Nextcloud expects, if the address above is an IP
+    nextcloud_user: str = ""
+    nextcloud_password: str = ""               # an app password, revocable in Nextcloud
+    nextcloud_public_url: str = ""             # the address you use in a browser (for "Open in Nextcloud" links)
+    mail_address: str = ""                     # Email: the mailbox the app reads and sends from
+    mail_token: str = ""                       # an app token for that mailbox (revocable), not the mailbox password
+    mail_imap_host: str = ""
+    mail_imap_port: int = 993                  # implicit TLS only
+    mail_imap_tls_server_name: str = ""        # the name on the server's certificate, if you reach it by another address
+    mail_smtp_host: str = ""                   # SMTP over implicit TLS
+    mail_smtp_port: int = 465
+    mail_smtp_tls_server_name: str = ""
+    mail_webmail_url: str = ""                 # optional: the full webmail, for an "Open webmail" link
+    kanban_workspaces_dir: str = ""            # where the agent's container keeps kanban card workspaces (default /opt/data/kanban/workspaces)
     deck_dir: str = ""                       # folder of status files written by this install's own jobs (monitors, system, weather...)
     systems: dict = field(default_factory=dict)   # the services, websites and model lists to show (instance systems.json)
 
@@ -75,6 +114,8 @@ def load(env: dict | None = None) -> Config:
     f = cfg.instance_dir / "instance.toml"
     if f.is_file():
         data = tomllib.loads(f.read_text(encoding="utf-8"))
+        cfg.accordion_nav = data.get("accordion_nav") is True
+        cfg.avatar_presets = clean_presets(data.get("avatar_presets"))
         cfg.brand = str(data.get("brand", cfg.brand))
         cfg.agent_name = str(data.get("agent_name", cfg.agent_name))
         cfg.trusted_proxies = [str(x) for x in data.get("trusted_proxies", cfg.trusted_proxies)]
@@ -107,6 +148,21 @@ def load(env: dict | None = None) -> Config:
     cfg.action_gate_url = e.get("ACTION_GATE_URL", "")
     cfg.host_action_url = e.get("HOST_ACTION_URL", "")
     cfg.host_action_key = e.get("HOST_ACTION_KEY", "")
+    cfg.kanban_workspaces_dir = e.get("HERMES_KANBAN_WORKSPACES", "")
+    cfg.nextcloud_url = e.get("NEXTCLOUD_URL", "")
+    cfg.nextcloud_host = e.get("NEXTCLOUD_HOST", "")
+    cfg.nextcloud_user = e.get("NEXTCLOUD_USER", "")
+    cfg.nextcloud_password = e.get("NEXTCLOUD_APP_PASSWORD", "")
+    cfg.nextcloud_public_url = e.get("NEXTCLOUD_PUBLIC_URL", "")
+    cfg.mail_address = e.get("MAIL_ADDRESS", "")
+    cfg.mail_token = e.get("MAIL_TOKEN", "")
+    cfg.mail_imap_host = e.get("MAIL_IMAP_HOST", "")
+    cfg.mail_imap_port = int(e.get("MAIL_IMAP_PORT", "993") or 993)
+    cfg.mail_imap_tls_server_name = e.get("MAIL_IMAP_TLS_SERVER_NAME", "")
+    cfg.mail_smtp_host = e.get("MAIL_SMTP_HOST", "")
+    cfg.mail_smtp_port = int(e.get("MAIL_SMTP_PORT", "465") or 465)
+    cfg.mail_smtp_tls_server_name = e.get("MAIL_SMTP_TLS_SERVER_NAME", "")
+    cfg.mail_webmail_url = e.get("MAIL_WEBMAIL_URL", "")
     sysf = cfg.instance_dir / "systems.json"
     if sysf.is_file():
         try:

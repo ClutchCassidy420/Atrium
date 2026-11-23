@@ -24,76 +24,13 @@ import re
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
+from agentkit import (AgentRoute as _AgentRoute)
 
 # --- the agent's name --------------------------------------------------------------------------------------------
 # Text in this file says {{agent}} wherever it means the agent's name. It is filled in on the way out (JSON, errors,
 # streams, files) from <data>/atrium/agent.json, which the Settings tab writes. Without it the name is "Assistant".
-
-_AGENT_NAME_RE = __import__("re").compile(r"^[A-Za-z0-9][A-Za-z0-9 ._'-]{0,39}$")
-_agent_cache: dict = {"t": 0.0, "v": "Assistant"}
-
-
-def _agent_name() -> str:
-    import json as _json
-    import os as _os
-    import time as _time
-    from pathlib import Path as _Path
-    if _time.time() - _agent_cache["t"] < 5:
-        return _agent_cache["v"]
-    name = "Assistant"
-    try:
-        home = _Path(_os.environ.get("HERMES_HOME") or "/opt/data")
-        value = _json.loads((home / "atrium" / "agent.json").read_text(encoding="utf-8")).get("name")
-        if isinstance(value, str) and _AGENT_NAME_RE.match(value.strip()):
-            name = value.strip()
-    except (OSError, ValueError, AttributeError):
-        pass
-    _agent_cache.update({"t": _time.time(), "v": name})
-    return name
-
-
-def _T(text):
-    return text.replace("{{agent}}", _agent_name()) if isinstance(text, str) and "{{agent}}" in text else text
-
-
-def _fill(resp):
-    body = getattr(resp, "body", None)
-    if isinstance(body, (bytes, bytearray)) and b"{{agent}}" in body:
-        resp.body = bytes(body).replace(b"{{agent}}", _agent_name().encode("utf-8"))
-        resp.headers["content-length"] = str(len(resp.body))
-    elif hasattr(resp, "body_iterator"):
-        inner = resp.body_iterator
-
-        async def _gen():
-            async for chunk in inner:
-                if isinstance(chunk, (bytes, bytearray)):
-                    yield bytes(chunk).replace(b"{{agent}}", _agent_name().encode("utf-8"))
-                elif isinstance(chunk, str):
-                    yield _T(chunk)
-                else:
-                    yield chunk
-        resp.body_iterator = _gen()
-    return resp
-
-
-from fastapi.routing import APIRoute as _APIRoute  # noqa: E402
-
-
-class _AgentRoute(_APIRoute):
-    def get_route_handler(self):
-        original = super().get_route_handler()
-
-        async def handler(request):
-            try:
-                resp = await original(request)
-            except HTTPException as exc:
-                detail = _T(exc.detail) if isinstance(exc.detail, str) else exc.detail
-                raise HTTPException(status_code=exc.status_code, detail=detail, headers=exc.headers) from None
-            return _fill(resp)
-        return handler
-
 
 router = APIRouter(route_class=_AgentRoute)
 _ID_RE = re.compile(r"^[a-f0-9]{12}$")
@@ -248,3 +185,62 @@ async def set_schedule(job_id: str, body: ScheduleBody) -> dict:
             raise HTTPException(status_code=502, detail="The scheduler refused that change.")
     await asyncio.to_thread(run)
     return {"ok": True, "when": human(new), "expr": cron}
+
+
+# --- your own chat model --------------------------------------------------------------------------------------------
+
+class ModelSelection(BaseModel):
+    id: str = Field(default="", max_length=240)
+    provider: str = Field(default="", max_length=80)
+    confirm: bool = False
+
+
+NOT_CLOUD = ("custom", "ollama", "lmstudio")          # providers that are the machine's own models, not a cloud service
+
+
+async def cloud_catalog() -> list:
+    """The cloud providers that are connected to the agent, with the models each offers."""
+    code, catalog = await HERMES.dash_call("GET", "/api/model/options", timeout=25)
+    if code != 200 or not isinstance(catalog, dict):
+        return []
+    out = []
+    for p in catalog.get("providers") or []:
+        if not isinstance(p, dict) or not p.get("authenticated") or p.get("is_user_defined") or p.get("slug") in NOT_CLOUD:
+            continue
+        models = [m for m in (p.get("models") or []) if isinstance(m, str)]
+        if p.get("slug") and models:
+            out.append({"id": p["slug"], "label": p.get("name") or p["slug"], "models": models})
+    return out
+
+
+@router.get("/models")
+async def models(request: Request):
+    import chat_model
+    from mission_backend import engine_state
+
+    return {"cloud": await cloud_catalog(), "engine": chat_model.selection(request.state.who["user"]) or engine_state()}
+
+
+@router.post("/models")
+async def select_model(body: ModelSelection, request: Request):
+    """Use a model from a connected cloud provider for your chats. Your chat text is sent to that provider, so it needs an explicit yes."""
+    import chat_model
+
+    if not body.provider or not body.id:
+        raise HTTPException(400, "Choose a provider and a model.")
+    if not body.confirm:
+        raise HTTPException(400, "Confirm sending your chats to this cloud provider.")
+    if not any(p["id"] == body.provider and body.id in p["models"] for p in await cloud_catalog()):
+        raise HTTPException(409, "Choose a model from a connected cloud provider.")
+    await asyncio.to_thread(chat_model.save, request.state.who["user"], {"engine": "cloud", "provider": body.provider, "model": body.id})
+    return {"ok": True}
+
+
+@router.post("/models/use-default")
+async def use_default_model(request: Request):
+    """Go back to the install's default model for your chats."""
+    import chat_model
+
+    await asyncio.to_thread(chat_model.save, request.state.who["user"], {"engine": "local"})
+    return {"ok": True}
+

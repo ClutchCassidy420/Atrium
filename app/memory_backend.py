@@ -25,74 +25,11 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException
+from agentkit import (AgentRoute as _AgentRoute)
 
 # --- the agent's name --------------------------------------------------------------------------------------------
 # Text in this file says {{agent}} wherever it means the agent's name. It is filled in on the way out (JSON, errors,
 # streams, files) from <data>/atrium/agent.json, which the Settings tab writes. Without it the name is "Assistant".
-
-_AGENT_NAME_RE = __import__("re").compile(r"^[A-Za-z0-9][A-Za-z0-9 ._'-]{0,39}$")
-_agent_cache: dict = {"t": 0.0, "v": "Assistant"}
-
-
-def _agent_name() -> str:
-    import json as _json
-    import os as _os
-    import time as _time
-    from pathlib import Path as _Path
-    if _time.time() - _agent_cache["t"] < 5:
-        return _agent_cache["v"]
-    name = "Assistant"
-    try:
-        home = _Path(_os.environ.get("HERMES_HOME") or "/opt/data")
-        value = _json.loads((home / "atrium" / "agent.json").read_text(encoding="utf-8")).get("name")
-        if isinstance(value, str) and _AGENT_NAME_RE.match(value.strip()):
-            name = value.strip()
-    except (OSError, ValueError, AttributeError):
-        pass
-    _agent_cache.update({"t": _time.time(), "v": name})
-    return name
-
-
-def _T(text):
-    return text.replace("{{agent}}", _agent_name()) if isinstance(text, str) and "{{agent}}" in text else text
-
-
-def _fill(resp):
-    body = getattr(resp, "body", None)
-    if isinstance(body, (bytes, bytearray)) and b"{{agent}}" in body:
-        resp.body = bytes(body).replace(b"{{agent}}", _agent_name().encode("utf-8"))
-        resp.headers["content-length"] = str(len(resp.body))
-    elif hasattr(resp, "body_iterator"):
-        inner = resp.body_iterator
-
-        async def _gen():
-            async for chunk in inner:
-                if isinstance(chunk, (bytes, bytearray)):
-                    yield bytes(chunk).replace(b"{{agent}}", _agent_name().encode("utf-8"))
-                elif isinstance(chunk, str):
-                    yield _T(chunk)
-                else:
-                    yield chunk
-        resp.body_iterator = _gen()
-    return resp
-
-
-from fastapi.routing import APIRoute as _APIRoute  # noqa: E402
-
-
-class _AgentRoute(_APIRoute):
-    def get_route_handler(self):
-        original = super().get_route_handler()
-
-        async def handler(request):
-            try:
-                resp = await original(request)
-            except HTTPException as exc:
-                detail = _T(exc.detail) if isinstance(exc.detail, str) else exc.detail
-                raise HTTPException(status_code=exc.status_code, detail=detail, headers=exc.headers) from None
-            return _fill(resp)
-        return handler
-
 
 router = APIRouter(route_class=_AgentRoute)
 
@@ -107,25 +44,49 @@ def _vault() -> Path:
     return Path(os.environ.get("HERMES_HOME") or "/opt/data") / "obsidian-vault"
 
 
+# One parsed entry per note file, valid while the file's (modification time, size) stay the same. Every request still walks
+# the vault and stats each file, so an edit shows up at once; only unchanged notes are not read and parsed again.
+# The dict is replaced as a whole at the end of a scan, so scans running in parallel threads never see a half-built one.
+_note_cache: dict[str, tuple[tuple[int, int], dict]] = {}
+
+
 def _scan() -> list[dict]:
+    global _note_cache
     root = _vault()
     notes: list[dict] = []
     if not root.is_dir():
+        _note_cache = {}
         return notes
+    previous, seen = _note_cache, {}
+    try:
+        return _scan_into(root, notes, previous, seen)
+    finally:
+        _note_cache = seen
+
+
+def _scan_into(root: Path, notes: list[dict], previous: dict, seen: dict) -> list[dict]:
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS and not d.startswith(".")]
         for fn in filenames:
             if not fn.lower().endswith(".md"):
                 continue
             p = Path(dirpath) / fn
+            rel = p.relative_to(root).as_posix()
             try:
                 st = p.stat()
                 if st.st_size > MAX_NOTE_BYTES:
                     continue
+                stamp = (st.st_mtime_ns, st.st_size)
+                hit = previous.get(str(root) + "/" + rel)
+                if hit and hit[0] == stamp:
+                    seen[str(root) + "/" + rel] = hit
+                    notes.append(hit[1])
+                    if len(notes) >= MAX_NOTES:
+                        return notes
+                    continue
                 text = p.read_text(encoding="utf-8", errors="ignore")
             except OSError:
                 continue
-            rel = p.relative_to(root).as_posix()
             first = ""
             title = Path(fn).stem
             for line in text.splitlines():
@@ -138,8 +99,10 @@ def _scan() -> list[dict]:
                 if not s.startswith("#"):
                     first = re.sub(r"[*_`>\[\]]+", "", s)[:140]
                     break
-            notes.append({"id": rel, "title": title[:100], "folder": rel.split("/")[0] if "/" in rel else "(top)", "size": st.st_size,
-                          "mtime": int(st.st_mtime), "summary": first, "text": text})
+            note = {"id": rel, "title": title[:100], "folder": rel.split("/")[0] if "/" in rel else "(top)", "size": st.st_size,
+                    "mtime": int(st.st_mtime), "summary": first, "text": text}
+            seen[str(root) + "/" + rel] = (stamp, note)
+            notes.append(note)
             if len(notes) >= MAX_NOTES:
                 return notes
     return notes

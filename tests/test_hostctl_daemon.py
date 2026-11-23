@@ -316,3 +316,21 @@ def test_a_failed_update_leaves_no_restore_point_to_roll_back_to(hc, monkeypatch
     monkeypatch.setattr(hc, "wait_healthy", lambda *a, **k: (True, ""))
     assert hc.run_container("container_update", "voice") == 1
     assert hc.container_state()["restore_points"] == {}                                              # nothing misleading offered as a rollback
+
+
+def test_unhealthy_rollback_keeps_restore_point(hc, tmp_path, monkeypatch):
+    _pinned_setup(hc, monkeypatch, tmp_path)
+    monkeypatch.setattr(hc, "run", lambda cmd, *a: (0, "[]") if cmd[:2] == ["docker", "inspect"] else (0, ""))
+    monkeypatch.setattr(hc, "wait_healthy", lambda *a, **k: (False, "wrong running image"))
+    assert hc.run_container("container_update", "voice") == 1
+    assert hc.container_state()["restore_points"]["voice"]
+    assert not json.loads((tmp_path / "last-container-op.json").read_text())["auto_rolled_back"]
+    monkeypatch.setattr(hc, "discover", lambda: {})
+    monkeypatch.setattr(hc, "wait_healthy", lambda *a, **k: (True, ""))
+    assert hc.run_container("container_rollback", "voice") == 0
+
+
+def test_package_discovery_failure_is_reported(hc, tmp_path, monkeypatch):
+    monkeypatch.setattr(hc, "run", lambda *a: (1, "unavailable"))
+    assert hc.run_update("update_safe") == 1
+    assert not json.loads((tmp_path / "last-update.json").read_text())["ok"]

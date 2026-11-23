@@ -9,6 +9,9 @@ import os
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
+from connections_backend import connection_router
+from model_setup import model_setup_router
+
 OWNER_PLUGINS = ("memory", "workflows", "settings", "room")
 # the only routes of the Mission Control backend that the app mounts (the rest is replaced by the Home page)
 MISSION_ROUTES = ("/focus", "/focus/toggle", "/focus/remove", "/engine", "/soul", "/soul/version", "/soul/restore")
@@ -44,11 +47,20 @@ def mount_owner_pages(app, cfg, hermes, current, same_origin) -> None:
     for name in OWNER_PLUGINS:
         app.include_router(backends[name].router, prefix=prefix_for(name), dependencies=[Depends(guard)])
 
+    app.include_router(model_setup_router(hermes), prefix=prefix_for("settings"), dependencies=[Depends(guard)])
+    app.include_router(connection_router(hermes), prefix=prefix_for("settings"), dependencies=[Depends(guard)])
+
     hostctl_backend.configure(cfg, hermes)
     import overview
     overview.HOST_ACTIONS = bool(cfg.host_action_url and cfg.host_action_key)
     app.include_router(hostctl_backend.router, prefix="/api/host", dependencies=[Depends(guard)])
     app.include_router(kanban_backend.router, prefix="/api/kanban", dependencies=[Depends(guard)])
+    import nextcloud_backend
+    if nextcloud_backend.configure(cfg):                 # Files and Calendar exist only when a Nextcloud is configured
+        app.include_router(nextcloud_backend.router, prefix="/api/nextcloud", dependencies=[Depends(guard)])
+    import mail_backend
+    if mail_backend.configure(cfg):                     # Email exists only when a mailbox is configured
+        app.include_router(mail_backend.router, prefix="/api/mail", dependencies=[Depends(guard)])
     pipeline_backend.configure(cfg, hermes, app)
     app.include_router(pipeline_backend.router, prefix="/api/pipeline", dependencies=[Depends(guard)])
 

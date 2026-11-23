@@ -236,3 +236,26 @@ def test_redirects_are_read_and_checked_from_the_instance_file(tmp_path):
     (inst / "instance.toml").write_text('[redirects]\n"/a" = "/chat"\n"b" = "/chat"\n"//c" = "/chat"\n"/d" = "//evil.example"\n"/e" = "/e"\n')
     cfg = configmod.load({"INSTANCE_DIR": str(inst), "DATA_DIR": str(tmp_path / "d")})
     assert cfg.redirects == {"/a": "/chat"}
+
+
+def test_an_install_can_add_scripts_to_an_existing_page_but_only_validated_ones(tmp_path):
+    core = tmp_path / "core.json"
+    ok = {"id": "a", "path": "/a", "label": "A", "plugin": "pa", "scripts": ["/static/x.js"]}
+    core.write_text(json.dumps([ok]))
+    (tmp_path / "pages.d").mkdir()
+    ext = tmp_path / "pages.d" / "more.json"
+    ext.write_text(json.dumps([{"extend": "a", "scripts": ["/instance/static/more.js", "/static/x.js"], "styles": ["/instance/static/more.css"]}]))
+    page = load_pages(core, tmp_path, [])[0]
+    assert page["scripts"] == ["/static/x.js", "/instance/static/more.js"]          # added after the page's own, and never twice
+    assert page["styles"] == ["/instance/static/more.css"]
+    for bad in ({"scripts": ["/static/../x.js"]}, {"scripts": ["https://evil.example/x.js"]}, {"styles": ["//evil.example/x.css"]}):
+        ext.write_text(json.dumps([dict({"extend": "a"}, **bad)]))
+        with pytest.raises(ValueError):
+            load_pages(core, tmp_path, [])
+    ext.write_text(json.dumps([{"extend": "missing", "scripts": ["/instance/static/m.js"]}]))
+    with pytest.raises(ValueError):                                                   # a typo in the page name must not pass silently
+        load_pages(core, tmp_path, [])
+    ext.write_text(json.dumps([{"extend": "a", "scripts": ["/instance/static/m.js"]}]))
+    assert load_pages(core, tmp_path, ["a"]) == []                                    # a page the install turned off stays off
+    ext.write_text(json.dumps([{"extend": "gone", "scripts": ["/instance/static/m.js"]}]))
+    assert len(load_pages(core, tmp_path, ["gone"])) == 1                             # an extension of a turned-off page is skipped, not an error

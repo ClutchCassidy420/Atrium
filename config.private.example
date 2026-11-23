@@ -9,6 +9,7 @@ HERMES_API_KEY=             # held server-side only
 HERMES_DASHBOARD_BASE=      # the dashboard server, for /api/status, /api/sessions and similar
 HERMES_DASHBOARD_TOKEN=     # only if the fixed-token option is chosen (see docs/STAGE0-FINDINGS.md, section 4)
 HERMES_DATA_DIR=            # the Hermes data folder, mounted into the app
+HERMES_KANBAN_WORKSPACES=   # optional: where the agent's container keeps kanban card workspaces, if not /opt/data/kanban/workspaces
 DECK_DATA_DIR=              # optional: a folder of status files your own jobs write (status.json, system.json, extra.json, weather.json, river.json)
 
 # Services
@@ -16,6 +17,22 @@ TTS_URL=                    # optional: text-to-speech endpoint for read-aloud, 
 ACTION_GATE_URL=            # optional: the approval service for the agent's proposed actions (leave empty if you have none)
 PUSH_PROXY=                 # optional: an outbound proxy for push messages (needed when the app's network has no direct internet; allow the push services in it)
 PUSH_ENABLED=               # 1 turns on phone notifications and the installable phone app (owners only); needs the cryptography package
+
+# Email (optional: the Email pages appear only when these are set; connections are always verified, never plain)
+MAIL_ADDRESS=               # the mailbox the app reads and sends from
+MAIL_TOKEN=                 # an app token for that mailbox (revocable), not the mailbox password
+MAIL_IMAP_HOST=             # IMAP over implicit TLS, port 993
+MAIL_IMAP_TLS_SERVER_NAME=  # the name on the server's certificate, if MAIL_IMAP_HOST is some other address
+MAIL_SMTP_HOST=             # SMTP over implicit TLS (default port 465, MAIL_SMTP_PORT)
+MAIL_SMTP_TLS_SERVER_NAME=  # the name on the server's certificate, if MAIL_SMTP_HOST is some other address
+MAIL_WEBMAIL_URL=           # optional: the full webmail, for an "Open webmail" link
+
+# Files and Calendar (optional: shown only when these are set; WebDAV and CalDAV on a Nextcloud server)
+NEXTCLOUD_URL=              # where the app reaches Nextcloud, e.g. https://cloud.example.com or an address on a private network
+NEXTCLOUD_HOST=             # optional: the Host header Nextcloud expects, if the address above is an IP
+NEXTCLOUD_USER=
+NEXTCLOUD_APP_PASSWORD=     # an app password created in Nextcloud (revocable), never the account password
+NEXTCLOUD_PUBLIC_URL=       # the address you use in a browser, for "Open in Nextcloud" links
 
 # Login
 OWNER_PASSWORD_HASH=        # optional: creates the first owner user if no users exist yet. Afterwards manage people with scripts/manage_users.py

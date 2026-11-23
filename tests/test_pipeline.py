@@ -15,6 +15,8 @@ CARDS = {}
 PROJECTS = []
 FILES = {}
 CALLS = []
+CHECKPOINTS = []
+FAIL_CHECKPOINT = [False]
 FLOW = [{"key": k, "label": k.title(), "icon": "*", "drag_target": k not in ("running", "scheduled")}
         for k in ("triage", "todo", "scheduled", "ready", "running", "blocked", "review", "done")]
 
@@ -79,6 +81,11 @@ class Sidecar(BaseHTTPRequestHandler):
         if p == "/file" and self.command == "PUT":
             FILES[(body["project"], body["path"])] = body["text"]
             return reply(self, 200, {"ok": True})
+        if p == "/git/checkpoint" and self.command == "POST":
+            if FAIL_CHECKPOINT[0]:
+                return reply(self, 500, {"detail": "git failed"})
+            CHECKPOINTS.append(body)
+            return reply(self, 200, {"ref": "refs/atrium/checkpoints/%d" % len(CHECKPOINTS)})
         reply(self, 404, {"detail": "no"})
 
     do_GET = do_POST = do_PUT = go
@@ -86,7 +93,7 @@ class Sidecar(BaseHTTPRequestHandler):
 
 @pytest.fixture()
 def pipe(make, cfg):
-    CARDS.clear(); PROJECTS.clear(); FILES.clear(); CALLS.clear()
+    CARDS.clear(); PROJECTS.clear(); FILES.clear(); CALLS.clear(); CHECKPOINTS.clear(); FAIL_CHECKPOINT[0] = False
     d, s = HTTPServer(("127.0.0.1", 0), Dash), HTTPServer(("127.0.0.1", 0), Sidecar)
     for srv in (d, s):
         threading.Thread(target=srv.serve_forever, daemon=True).start()
@@ -170,3 +177,109 @@ def test_only_owners_and_bad_ids(pipe):
     assert login(pipe, "bob", PW2, ip="10.9.1.2").status_code == 303
     assert pipe.get("/api/pipeline/ideas").status_code == 403
     assert pipe.post("/api/pipeline/ideas", json={"title": "x"}, headers=H).status_code == 403
+
+
+# ---------------------------------------------------------------- ideas belong to a project
+
+def run_to_plan(pipe, iid):
+    v = pipe.post("/api/pipeline/ideas/%s/advance" % iid, headers=H).json()
+    finish(v["cards"]["research"])
+    v = pipe.post("/api/pipeline/ideas/%s/advance" % iid, headers=H).json()
+    finish(v["cards"]["plan"])
+    return v
+
+
+def test_ideas_are_listed_per_project_and_unknown_projects_are_refused(pipe):
+    PROJECTS.append("shop")
+    a = pipe.post("/api/pipeline/ideas", json={"title": "Incubator idea"}, headers=H).json()
+    b = pipe.post("/api/pipeline/ideas", json={"title": "Shop idea", "project": "shop"}, headers=H).json()
+    assert FILES[("shop", "ideas/%s/idea.md" % b["slug"])] and ("idea-pipeline", "ideas/%s/idea.md" % a["slug"]) in FILES
+    titles = lambda q: [i["title"] for i in pipe.get("/api/pipeline/ideas" + q).json()["ideas"]]
+    assert titles("?project=shop") == ["Shop idea"] and titles("?project=idea-pipeline") == ["Incubator idea"] and sorted(titles("")) == sorted(titles("?project=all")) == ["Incubator idea", "Shop idea"]
+    assert pipe.post("/api/pipeline/ideas", json={"title": "x", "project": "ghost"}, headers=H).status_code == 404
+    assert pipe.post("/api/pipeline/ideas", json={"title": "x", "project": "../etc"}, headers=H).status_code == 400
+    assert pipe.get("/api/pipeline/ideas?project=../etc").status_code == 400
+
+
+def test_an_idea_in_an_existing_project_is_built_there_after_a_restore_point(pipe):
+    PROJECTS.append("shop")
+    iid = pipe.post("/api/pipeline/ideas", json={"title": "Dark mode", "project": "shop"}, headers=H).json()["id"]
+    v = run_to_plan(pipe, iid)
+    assert CARDS[v["cards"]["plan"]]["workspace_path"] == "/workspace/shop"                           # notes live in the project too
+    v = pipe.post("/api/pipeline/ideas/%s/advance" % iid, headers=H).json()
+    assert v["stage"] == "build" and v["project"] == "shop" and CARDS[v["cards"]["build"]]["workspace_path"] == "/workspace/shop"
+    assert CHECKPOINTS == [{"project": "shop", "label": "before pipeline build: Dark mode"}] and PROJECTS == ["shop"]      # saved first, and no second project
+
+
+def test_a_failed_restore_point_stops_the_build_instead_of_continuing(pipe):
+    PROJECTS.append("shop")
+    iid = pipe.post("/api/pipeline/ideas", json={"title": "Risky", "project": "shop"}, headers=H).json()["id"]
+    run_to_plan(pipe, iid)
+    cards_before = len(CARDS)
+    FAIL_CHECKPOINT[0] = True
+    assert pipe.post("/api/pipeline/ideas/%s/advance" % iid, headers=H).status_code >= 400
+    got = pipe.get("/api/pipeline/ideas").json()["ideas"][0]
+    assert got["stage"] == "plan" and got["next"] == "build" and len(CARDS) == cards_before         # nothing started, nothing changed
+    FAIL_CHECKPOINT[0] = False
+    assert pipe.post("/api/pipeline/ideas/%s/advance" % iid, headers=H).json()["stage"] == "build"
+
+
+# ---------------------------------------------------------------- an interrupted step can be retried safely
+
+def test_a_retry_after_a_lost_save_adopts_the_card_instead_of_making_a_second(pipe, monkeypatch):
+    import pipeline_backend as pb
+    iid = pipe.post("/api/pipeline/ideas", json={"title": "Flaky"}, headers=H).json()["id"]
+    real = pb._save
+
+    def save_that_loses_the_stage_change(d):
+        if d["ideas"][iid]["stage"] == "research":
+            raise OSError("disk full")                      # the card was made on the board, then the save failed
+        return real(d)
+    monkeypatch.setattr(pb, "_save", save_that_loses_the_stage_change)
+    with pytest.raises(OSError):
+        pipe.post("/api/pipeline/ideas/%s/advance" % iid, headers=H)
+    assert len([c for c in CARDS.values() if c["title"].startswith("Research:")]) == 1
+    monkeypatch.setattr(pb, "_save", real)
+    v = pipe.post("/api/pipeline/ideas/%s/advance" % iid, headers=H).json()
+    research = [cid for cid, c in CARDS.items() if c["title"].startswith("Research:")]
+    assert len(research) == 1 and v["cards"]["research"] == research[0]                            # the same card, adopted
+
+
+def test_a_retry_of_the_build_step_reuses_the_project_it_chose(pipe, monkeypatch):
+    import pipeline_backend as pb
+    from fastapi import HTTPException
+    iid = pipe.post("/api/pipeline/ideas", json={"title": "Wiki"}, headers=H).json()["id"]
+    run_to_plan(pipe, iid)
+    real, fails = pb._create_card, [True]
+
+    async def card_that_fails_once(stage, e, body, i):
+        if stage == "build" and fails[0]:
+            fails[0] = False
+            raise HTTPException(status_code=502, detail="The board did not answer.")
+        return await real(stage, e, body, i)
+    monkeypatch.setattr(pb, "_create_card", card_that_fails_once)
+    assert pipe.post("/api/pipeline/ideas/%s/advance" % iid, headers=H).status_code == 502
+    made = [p for p in PROJECTS if p.startswith("wiki-")]
+    assert len(made) == 1                                                                           # the project exists, the card does not
+    v = pipe.post("/api/pipeline/ideas/%s/advance" % iid, headers=H).json()
+    assert [p for p in PROJECTS if p.startswith("wiki-")] == made and v["project"] == made[0]       # no "-2" duplicate
+    assert CARDS[v["cards"]["build"]]["workspace_path"] == "/workspace/" + made[0]
+
+
+def test_when_approve_everything_cannot_continue_it_says_so(pipe, monkeypatch):
+    import pipeline_backend as pb
+    from fastapi import HTTPException
+    iid = pipe.post("/api/pipeline/ideas", json={"title": "Auto", "auto": True}, headers=H).json()["id"]
+    v = pipe.post("/api/pipeline/ideas/%s/advance" % iid, headers=H).json()
+    finish(v["cards"]["research"])
+    real = pb._advance
+
+    async def broken(i, by_auto=False):
+        raise HTTPException(status_code=502, detail="The board did not answer.")
+    monkeypatch.setattr(pb, "_advance", broken)
+    assert asyncio.run(pb.chain_once()) == 0
+    got = pipe.get("/api/pipeline/ideas").json()["ideas"][0]
+    assert got["auto_error"]["detail"] == "The board did not answer."                               # visible on the idea, not a silent stall
+    monkeypatch.setattr(pb, "_advance", real)
+    assert asyncio.run(pb.chain_once()) == 1
+    assert pipe.get("/api/pipeline/ideas").json()["ideas"][0]["auto_error"] is None

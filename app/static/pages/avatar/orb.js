@@ -56,6 +56,8 @@
     { name: "Empress", look: { avatar: "devil", theme: "gold", hair: "short", hairColor: "jet", horns: "crown", prop: "staff", outfit: "gown", eyes: "gold" } },
     { name: "Venom", look: { avatar: "devil", theme: "emerald", hair: "short", hairColor: "blonde", horns: "long", prop: "orb", outfit: "short", eyes: "green" } }
   ];
+  var configuredLooks = (window.__APP_CONFIG__ || {}).avatarPresets;
+  if (Array.isArray(configuredLooks) && configuredLooks.length) LOOK_PRESETS = configuredLooks;
   var LOOK_KEY = "atrium:look";
 
   function mergeLook(base, patch) {
@@ -136,6 +138,8 @@
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       var reduce = !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
       var t = 0, raf = 0, last = 0, lastDt = 0.033;
+      // keep the "tool in use" signal fresh while she works, so the matching icon glows
+      var stopTool = window.__AVATAR_TOOL__ ? window.__AVATAR_TOOL__.poll(function () { return stateRef.current === "working"; }) : null;
 
       function rgba(c, a) { return "rgba(" + c.join(",") + "," + a + ")"; }
 
@@ -317,7 +321,16 @@
       function drawOrbiter(o, pal, off, alpha) {
         var sc = 0.85 + o.z * 0.2;
         if (o.kind === "book") { ctx.save(); ctx.globalAlpha = alpha; drawBook(o.x, o.y, o.tilt, sc * (o.z < 0 ? 0.9 : 1), pal, off); ctx.restore(); }
-        else drawSkillIcon(o.kind, o.x, o.y, sc * 1.1, pal, off, alpha);
+        else {
+          // while working, the icon for the tool she is really using right now glows (from the live tool activity)
+          var lt = window.__ATRIUM_TOOL__, hot = !!(stateRef.current === "working" && lt && lt.kind && lt.kind === o.kind && (Date.now() - lt.at) < 25000);
+          if (hot) {
+            var hp = 0.65 + 0.35 * Math.sin(t * 6), hg = ctx.createRadialGradient(o.x, o.y, 2, o.x, o.y, 28);
+            hg.addColorStop(0, rgba(pal.b, 0.8 * hp)); hg.addColorStop(1, rgba(pal.b, 0));
+            ctx.save(); ctx.fillStyle = hg; ctx.fillRect(o.x - 32, o.y - 32, 64, 64); ctx.restore();
+          }
+          drawSkillIcon(o.kind, o.x, o.y, sc * (hot ? 1.3 : 1.1), pal, off, alpha);
+        }
       }
 
       function drawBook(x, y, tilt, scale, pal, off) {
@@ -1016,7 +1029,7 @@
       lookRef.current = LOOK;
       draw();
       if (!reduce) raf = requestAnimationFrame(frame);
-      return function () { if (raf) cancelAnimationFrame(raf); window.removeEventListener("atrium:look", onLook); };
+      return function () { if (raf) cancelAnimationFrame(raf); window.removeEventListener("atrium:look", onLook); if (stopTool) stopTool(); };
     }, []);
 
     useEffect(function () {
@@ -1511,4 +1524,6 @@
 
   window.__AVATARS__ = { Orb: Orb, THEMES: THEMES, BOW_COLORS: BOW_COLORS, TIE_COLORS: TIE_COLORS, HAIR_COLORS: HAIR_COLORS, EYE_COLORS: EYE_COLORS,
     Galaxy: Galaxy, LOOK_DEFAULT: LOOK_DEFAULT, LOOK_PRESETS: LOOK_PRESETS, mergeLook: mergeLook, getLook: getLook, setLook: setLook, resetLook: resetLook };
+  // the chat page draws the character beside a conversation from window.__ATRIUM_UI__; an install that supplies its own Orb keeps it
+  window.__ATRIUM_UI__ = Object.assign({ Orb: Orb }, window.__ATRIUM_UI__ || {});
 })();

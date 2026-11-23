@@ -6,6 +6,7 @@ environment, never from this file. See docs/FRAMEWORK.md.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import html
 import json
 import mimetypes
@@ -18,11 +19,14 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 
 import config as configmod
+from agentkit import RUN_ID_RE, atomic_write_text
 from auth import Sessions, Throttle, hash_password, verify_password
 from hermes import Hermes
 from overview import Overview
 from chatmount import PREFIX as CHAT_PREFIX, mount_chat
 from code_backend import mount_code
+import chat_model
+import themes as themesmod
 from pages import load_pages
 from pagesmount import mount_owner_pages
 from users import UserStore
@@ -50,7 +54,10 @@ def make_app(cfg: configmod.Config | None = None, hermes: Hermes | None = None, 
     sessions = Sessions(cfg.data_dir / "sessions.json")
     overview = Overview(hermes, cfg.hermes_data_dir, cfg.deck_dir, cfg.systems)
     throttle = Throttle(cfg.max_fails, cfg.lock_minutes * 60)
-    pages = load_pages(HERE / "pages.json", cfg.instance_dir, cfg.pages_disabled)
+    chat_model.configure(cfg.data_dir)
+    configured = {"mail": bool(cfg.mail_address and cfg.mail_token and cfg.mail_imap_host),
+                  "nextcloud": bool(cfg.nextcloud_url and cfg.nextcloud_user and cfg.nextcloud_password)}
+    pages = [p for p in load_pages(HERE / "pages.json", cfg.instance_dir, cfg.pages_disabled) if not p["requires"] or configured[p["requires"]]]
     instance_static = (cfg.instance_dir / "static").resolve()
     theme_file = cfg.instance_dir / "theme.css"
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
@@ -70,6 +77,8 @@ def make_app(cfg: configmod.Config | None = None, hermes: Hermes | None = None, 
         u = users.get(s["user"])
         if not u or not cfg.valid_role(u["role"]):
             return None
+        if s.get("credential") and s["credential"] != hashlib.sha256(u["hash"].encode()).hexdigest():
+            return None
         return {"user": u["username"], "role": u["role"], "name": u.get("name") or ""}
 
     def same_origin(request: Request) -> bool:
@@ -78,14 +87,20 @@ def make_app(cfg: configmod.Config | None = None, hermes: Hermes | None = None, 
             return True
         return urlsplit(origin).netloc == request.headers.get("host", "")
 
-    def page_doc(body: str, title: str, status: int = 200, shell: bool = False) -> HTMLResponse:
-        doc = ('<!doctype html><html lang="en"><head><meta charset="utf-8">'
+    def page_doc(body: str, title: str, status: int = 200, shell: bool = False, theme: str = "") -> HTMLResponse:
+        # the person's chosen color theme goes on <html> so the very first paint already has it (no flash of the default look)
+        attr = ' data-theme="%s"' % html.escape(theme) if theme and theme != themesmod.DEFAULT else ""
+        doc = ('<!doctype html><html lang="en"%s><head><meta charset="utf-8">'
                '<meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="dark">'
-               '<title>%s</title><link rel="stylesheet" href="/static/tokens.css"><link rel="stylesheet" href="/static/app.css">'
+               '<title>%s</title><link rel="stylesheet" href="/static/tokens.css"><link rel="stylesheet" href="/static/themes.css">'
+               '<link rel="stylesheet" href="/static/app.css">'
                '%s<link rel="stylesheet" href="/instance/theme.css"></head><body class="%s">%s</body></html>'
-               % (html.escape(title), '<link rel="stylesheet" href="/static/shell.css">' if shell else "",
+               % (attr, html.escape(title), '<link rel="stylesheet" href="/static/shell.css">' if shell else "",
                   "vn" if shell else "", body))
         return HTMLResponse(doc, status_code=status)
+
+    def theme_of(who: dict) -> str:
+        return themesmod.clean((users.get(who["user"]) or {}).get("theme")) or themesmod.DEFAULT
 
     def login_page(error: str = "", status: int = 200) -> HTMLResponse:
         err = '<p class="err" role="alert">%s</p>' % html.escape(error) if error else ""
@@ -118,7 +133,7 @@ def make_app(cfg: configmod.Config | None = None, hermes: Hermes | None = None, 
                 '<script src="/static/vendor/react-dom.production.min.js"></script>'
                 '<script src="/shell-config.js"></script><script src="/static/shim.js"></script>'
                 % (brand, html.escape(who["user"]), name, brand))
-        return page_doc(body, cfg.brand, shell=True)
+        return page_doc(body, cfg.brand, shell=True, theme=theme_of(who))
 
     def allowed_pages(who: dict) -> list[dict]:
         return [p for p in pages if cfg.allows(who["role"], p["permission"])]
@@ -130,6 +145,16 @@ def make_app(cfg: configmod.Config | None = None, hermes: Hermes | None = None, 
         if not cfg.allows(who["role"], permission):
             return JSONResponse({"detail": "Not allowed for your role."}, status_code=403)
         return None
+
+    def guard(request: Request, permission: str, *, write: bool = False, plain_origin: bool = False, also=None):
+        """The checks every signed-in route needs, in one place and always in the same order:
+        signed in -> role -> ``also(who)`` (for example "is this your run") -> same origin (when the route changes something).
+        Returns (who, None) when the request may go on, or (None, the refusal to send back)."""
+        who = current(request)
+        refused = deny(who, permission) or (also(who) if also else None)
+        if not refused and write and not same_origin(request):
+            refused = PlainTextResponse("Bad origin.", status_code=403) if plain_origin else JSONResponse({"detail": "Bad origin."}, status_code=403)
+        return (None, refused) if refused else (who, None)
 
     @app.middleware("http")
     async def headers(request: Request, call_next):
@@ -201,7 +226,7 @@ def make_app(cfg: configmod.Config | None = None, hermes: Hermes | None = None, 
         for k in keys:
             throttle.ok(k)
         resp = RedirectResponse("/", status_code=303)
-        resp.set_cookie(cookie, sessions.create(user["username"]), max_age=30 * 24 * 3600, path="/",
+        resp.set_cookie(cookie, sessions.create(user["username"], hashlib.sha256(stored.encode()).hexdigest()), max_age=30 * 24 * 3600, path="/",
                         secure=secure_cookie, httponly=True, samesite="strict")
         return resp
 
@@ -217,8 +242,8 @@ def make_app(cfg: configmod.Config | None = None, hermes: Hermes | None = None, 
     # ---- signed-in routes ----------------------------------------------------------------------------------------
     @app.get("/api/me")
     async def me(request: Request):
-        who = current(request)
-        return deny(who, "use") or {"user": who["user"], "role": who["role"], "name": who["name"]}
+        who, refused = guard(request, "use")
+        return refused or {"user": who["user"], "role": who["role"], "name": who["name"]}
 
     def _clean_look(raw):
         """The saved avatar look: a flat dict of short settings. Anything else is refused."""
@@ -239,10 +264,9 @@ def make_app(cfg: configmod.Config | None = None, hermes: Hermes | None = None, 
     @app.get("/api/avatar-look")
     async def avatar_look_get(request: Request):
         """How the agent looks (one look for everyone, set by an owner). {"look": null} until one is saved."""
-        who = current(request)
-        denied = deny(who, "use")
-        if denied:
-            return denied
+        _, refused = guard(request, "use")
+        if refused:
+            return refused
         try:
             data = json.loads((cfg.data_dir / "avatar-look.json").read_text(encoding="utf-8"))
         except (OSError, ValueError):
@@ -251,43 +275,66 @@ def make_app(cfg: configmod.Config | None = None, hermes: Hermes | None = None, 
 
     @app.put("/api/avatar-look")
     async def avatar_look_put(request: Request):
-        who = current(request)
-        denied = deny(who, "admin")
-        if denied:
-            return denied
-        if not same_origin(request):
-            return PlainTextResponse("Bad origin.", status_code=403)
+        _, refused = guard(request, "admin", write=True, plain_origin=True)
+        if refused:
+            return refused
         try:
             look = _clean_look((await request.json()).get("look"))
         except Exception:
             look = None
         if look is None:
             return JSONResponse({"detail": "That look is not valid."}, status_code=422)
-        path = cfg.data_dir / "avatar-look.json"
-        tmp = path.with_name(path.name + ".tmp")
-        tmp.write_text(json.dumps(look), encoding="utf-8")
-        tmp.replace(path)
+        atomic_write_text(cfg.data_dir / "avatar-look.json", json.dumps(look))
         return {"ok": True}
+
+    @app.get("/api/themes")
+    async def themes_get(request: Request):
+        """The color themes on offer and the one this person has picked."""
+        who, refused = guard(request, "use")
+        if refused:
+            return refused
+        return {"themes": themesmod.THEMES, "current": theme_of(who), "default": themesmod.DEFAULT}
+
+    @app.put("/api/theme")
+    async def theme_put(request: Request):
+        """Save this person's own theme (everyone may choose theirs; it changes nothing for anyone else)."""
+        who, refused = guard(request, "use", write=True, plain_origin=True)
+        if refused:
+            return refused
+        try:
+            theme = themesmod.clean((await request.json()).get("theme"))
+        except Exception:
+            theme = None
+        if theme is None:
+            return JSONResponse({"detail": "That theme does not exist."}, status_code=422)
+        users.set_theme(who["user"], theme)
+        return {"ok": True, "current": theme}
 
     @app.get("/api/health")
     async def health(request: Request):
         """Yes/no answers about the connections to Hermes. Owners only. Never returns a secret."""
-        who = current(request)
-        return deny(who, "admin") or await hermes.health()
+        _, refused = guard(request, "admin")
+        return refused or await hermes.health()
 
     @app.get("/api/overview")
     async def overview_route(request: Request):
         """Everything the Home page shows. Infrastructure parts are included only for roles that may see them."""
-        who = current(request)
-        return deny(who, "use") or await overview.home(infra=cfg.allows(who["role"], "admin"), personal=cfg.allows(who["role"], "admin"))
+        who, refused = guard(request, "use")
+        return refused or await overview.home(infra=cfg.allows(who["role"], "admin"), personal=cfg.allows(who["role"], "admin"))
+
+    @app.get("/api/tool-activity")
+    async def tool_activity_route(request: Request):
+        """The agent's latest tool call (kind, name, time), for the glowing tool icons. Owners only; never any arguments."""
+        _, refused = guard(request, "admin")
+        return refused or await overview.tool_activity()
 
     @app.get("/api/systems")
     async def systems_route(request: Request):
-        who = current(request)
-        return deny(who, "admin") or await overview.systems_page()
+        _, refused = guard(request, "admin")
+        return refused or await overview.systems_page()
 
     # ---- asking the agent: start a run, watch it, stop it, answer an approval (one at a time per person) -------------
-    RUN_ID = re.compile(r"^[A-Za-z0-9_\-]{1,100}$")
+    RUN_ID = RUN_ID_RE
     TERMINAL = {"completed", "failed", "cancelled", "interrupted"}
     last_run: dict[str, dict] = {}                     # username -> {"id": run id, "at": monotonic time}
     owner_of: dict[str, str] = {}                      # run id -> username (bounded)
@@ -310,12 +357,9 @@ def make_app(cfg: configmod.Config | None = None, hermes: Hermes | None = None, 
 
     @app.post("/api/ask")
     async def ask(request: Request):
-        who = current(request)
-        refused = deny(who, "use")
+        who, refused = guard(request, "use", write=True)
         if refused:
             return refused
-        if not same_origin(request):
-            return JSONResponse({"detail": "Bad origin."}, status_code=403)
         try:
             message = str((await request.json()).get("message", "")).strip()
         except ValueError:
@@ -331,9 +375,11 @@ def make_app(cfg: configmod.Config | None = None, hermes: Hermes | None = None, 
             status, run = await hermes.api_call("GET", "/v1/runs/" + prev["id"])
             if status == 200 and run and run.get("status") not in TERMINAL:
                 return JSONResponse({"detail": "%s is still working on your last question." % cfg.agent_name}, status_code=409)
-        status, run = await hermes.api_call("POST", "/v1/runs", {"input": message, "session_id": "ask-" + who["user"]})
+        payload = {"input": message, "session_id": "ask-" + who["user"]}
+        payload.update(chat_model.override(who["user"]))
+        status, run = await hermes.api_call("POST", "/v1/runs", payload)
         rid = run.get("run_id") if isinstance(run, dict) else None
-        if status not in (200, 201) or not isinstance(rid, str) or not RUN_ID.match(rid):
+        if status not in (200, 201, 202) or not isinstance(rid, str) or not RUN_ID.match(rid):
             return JSONResponse({"detail": "Could not reach %s right now." % cfg.agent_name}, status_code=502)
         last_run[who["user"]] = {"id": rid, "at": time.monotonic()}
         owner_of[rid] = who["user"]
@@ -343,8 +389,7 @@ def make_app(cfg: configmod.Config | None = None, hermes: Hermes | None = None, 
 
     @app.get("/api/runs/{run_id}")
     async def run_get(run_id: str, request: Request):
-        who = current(request)
-        refused = deny(who, "use") or own_run(who, run_id)
+        _, refused = guard(request, "use", also=lambda who: own_run(who, run_id))
         if refused:
             return refused
         status, run = await hermes.api_call("GET", "/v1/runs/" + run_id)
@@ -352,23 +397,17 @@ def make_app(cfg: configmod.Config | None = None, hermes: Hermes | None = None, 
 
     @app.post("/api/runs/{run_id}/stop")
     async def run_stop(run_id: str, request: Request):
-        who = current(request)
-        refused = deny(who, "use") or own_run(who, run_id)
+        _, refused = guard(request, "use", write=True, also=lambda who: own_run(who, run_id))
         if refused:
             return refused
-        if not same_origin(request):
-            return JSONResponse({"detail": "Bad origin."}, status_code=403)
         status, res = await hermes.api_call("POST", "/v1/runs/" + run_id + "/stop", {})
         return {"ok": status == 200, "status": (res or {}).get("status")}
 
     @app.post("/api/runs/{run_id}/approval")
     async def run_approval(run_id: str, request: Request):
-        who = current(request)
-        refused = deny(who, "use") or own_run(who, run_id)
+        _, refused = guard(request, "use", write=True, also=lambda who: own_run(who, run_id))
         if refused:
             return refused
-        if not same_origin(request):
-            return JSONResponse({"detail": "Bad origin."}, status_code=403)
         try:
             body = await request.json()
         except ValueError:
@@ -385,8 +424,8 @@ def make_app(cfg: configmod.Config | None = None, hermes: Hermes | None = None, 
     @app.get("/api/gate-check")
     async def gate_check(request: Request):
         """For the approval service: 200 only if the session cookie it replays belongs to someone who may approve (owners)."""
-        who = current(request)
-        return deny(who, "admin") or {"ok": True, "user": who["user"]}
+        who, refused = guard(request, "admin")
+        return refused or {"ok": True, "user": who["user"]}
 
     @app.get("/shell-config.js")
     async def shell_config(request: Request):
@@ -395,6 +434,8 @@ def make_app(cfg: configmod.Config | None = None, hermes: Hermes | None = None, 
             return PlainTextResponse("", status_code=401)
         data = {"brand": cfg.brand, "agentName": cfg.agent_name, "user": who["user"], "name": who["name"], "role": who["role"],
                 "navGroups": cfg.nav_groups,
+                "accordionNav": cfg.accordion_nav,
+                "avatarPresets": cfg.avatar_presets,
                 "navIcons": cfg.nav_icons,
                 "pwa": ({"manifest": CHAT_PREFIX + "/manifest.webmanifest", "sw": CHAT_PREFIX + "/sw.js", "icon": CHAT_PREFIX + "/icon-192.png"} if cfg.push_enabled else None),
                 "pages": [{k: p[k] for k in ("id", "path", "label", "plugin", "scripts", "styles", "group", "subgroup", "order", "nav", "icon")} for p in allowed_pages(who)]}

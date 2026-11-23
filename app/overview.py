@@ -77,9 +77,15 @@ def latest_radar(vault: Path | None) -> dict:
     for ln in _read(files[-1]).split("\n"):
         m = _RADAR_RE.match(_WIKI_RE.sub(lambda mm: mm.group(1), ln))     # links first: their "|" would split the line
         if m and len(items) < 10:
+            why = m.group(4).strip()
             url = (m.group(5) or "").strip()
+            if not url:
+                trailing_url = re.search(r"(?:^|\s)(https?://\S+)$", why)
+                if trailing_url:
+                    url = trailing_url.group(1)
+                    why = why[:trailing_url.start()].rstrip()
             items.append({"rank": int(m.group(1)) if m.group(1) else len(items) + 1, "title": m.group(2).strip()[:140], "tag": m.group(3).strip()[:24],
-                          "why": m.group(4).strip()[:300], "url": url if url.startswith(("https://", "http://")) else ""})
+                          "why": why[:300], "url": url if url.startswith(("https://", "http://")) else ""})
     return {"date": files[-1].stem, "items": items}
 
 
@@ -118,6 +124,55 @@ def read_jobs(data) -> list[dict]:
                     "last_run_at": j.get("last_run_at"), "next_run_at": j.get("next_run_at"),
                     "schedule": j.get("schedule_display"), "streak": int(j.get("failure_streak") or 0)})
     return out
+
+
+_TOOL_KINDS = [("search", r"search"), ("web", r"browser|web|fetch|extract|crawl|url|http"), ("docker", r"docker|container"), ("git", r"git"),
+               ("db", r"sql|database|\bdb\b"), ("python", r"python|execute_code|code_exec"), ("terminal", r"terminal|shell|bash|process"),
+               ("mail", r"mail|email|send_message|message"), ("clock", r"cron|schedule|clock"), ("vault", r"memory|vault|obsidian|note|skill"),
+               ("code", r"file|read|write|patch|edit")]
+
+
+def tool_kind(name) -> str:
+    """Which drawn tool icon a tool name stands for (the icon glows while the agent really uses that tool), or "" for none."""
+    n = str(name or "").lower()
+    for kind, pattern in _TOOL_KINDS:
+        if re.search(pattern, n):
+            return kind
+    return ""
+
+
+def _to_ms(t):
+    if t is None:
+        return None
+    if isinstance(t, str):
+        try:
+            return int(datetime.datetime.fromisoformat(t.replace("Z", "+00:00")).timestamp() * 1000)
+        except ValueError:
+            return None
+    try:
+        t = float(t)
+    except (TypeError, ValueError):
+        return None
+    return int(t * 1000) if t < 1e12 else int(t)
+
+
+def doing_sentence(cards: list[str], jobs: list[str], api_runs: int = 0) -> str | None:
+    """One plain sentence about what the agent is busy with right now, or None when she is idle.
+    A running board card comes first (it names the work), then a running scheduled job, then a live reply."""
+    def clip(text: str, n: int = 110) -> str:
+        text = " ".join(str(text).split()).rstrip(".")
+        return text if len(text) <= n else text[: n - 1].rstrip() + "…"
+    cards = [c for c in cards if c and str(c).strip()]
+    jobs = [j for j in jobs if j and str(j).strip() and str(j) != "?"]
+    if cards:
+        extra = " (and %d more)" % (len(cards) - 1) if len(cards) > 1 else ""
+        return "Working on: %s%s." % (clip(cards[0]), extra)
+    if jobs:
+        extra = " (and %d more)" % (len(jobs) - 1) if len(jobs) > 1 else ""
+        return "Running the %s job%s." % (clip(jobs[0], 60), extra)
+    if api_runs:
+        return "Answering a message."
+    return None
 
 
 def board_summary(board) -> dict:
@@ -216,7 +271,7 @@ class Overview:
 
     async def _agent(self) -> dict:
         calls = {"status": self.hermes.dash_json("/api/status"), "stats": self.hermes.dash_json("/api/sessions/stats"),
-                 "usage": self.hermes.dash_json("/api/analytics/usage"), "recent": self.hermes.dash_json("/api/sessions?limit=6"),
+                 "usage": self.hermes.dash_json("/api/analytics/usage"), "recent": self.hermes.dash_json("/api/sessions?limit=15"),
                  "board": self.hermes.dash_json("/api/plugins/kanban/board")}
         got = dict(zip(calls, await asyncio.gather(*calls.values())))
         ok = lambda k: got[k][1] if got[k][0] == 200 and got[k][1] is not None else {}
@@ -226,15 +281,25 @@ class Overview:
         tools = [{"tool": t.get("tool"), "count": t.get("count", 0)} for t in (usage.get("tools", []) if isinstance(usage, dict) else [])][:7]
         sessions = [{"id": s.get("id"), "title": (s.get("title") or s.get("preview") or "Untitled")[:90], "source": s.get("source"),
                      "model": s.get("model"), "messages": s.get("message_count", 0), "last_active": s.get("last_active")}
-                    for s in (recent.get("sessions", []) if isinstance(recent, dict) else [])]
+                    for s in (recent.get("sessions", []) if isinstance(recent, dict) else [])][:6]
+        # a chat or command-line task that is open and was active in the last 90 seconds is real work too (cron check-ins are not)
+        live = []
+        for s in (recent.get("sessions", []) if isinstance(recent, dict) else []):
+            if not isinstance(s, dict) or str(s.get("source")) == "cron" or s.get("ended_at"):
+                continue
+            la = _to_ms(s.get("last_active"))
+            if la and time.time() * 1000 - la < 90000:
+                live.append(str(s.get("title") or s.get("preview") or "a task in progress"))
         plats = st.get("gateway_platforms", {}) if isinstance(st, dict) else {}
         # "working" means something is really running. The gateway's own busy flag and agent count can stay stuck on after the work has
         # finished (and cron jobs leave sessions open), so they are kept only for reference. Real work: a run on the agent API, a card in the
         # board's running column, or (added in home()) a scheduled job that is running.
         api = ((plats.get("api_server") or {}).get("metrics") or {}) if isinstance(plats, dict) else {}
         running_cards = sum(len(c.get("tasks", [])) for c in (board.get("columns", []) if isinstance(board, dict) else []) if isinstance(c, dict) and str(c.get("name")) == "running")
-        real = int(api.get("active_runs") or 0) + running_cards
+        real = int(api.get("active_runs") or 0) + running_cards + len(live)
+        running_titles = [str(t.get("title") or "") for c in (board.get("columns", []) if isinstance(board, dict) else []) if isinstance(c, dict) and str(c.get("name")) == "running" for t in c.get("tasks", []) if isinstance(t, dict)]
         return {
+            "running_titles": running_titles + live, "api_runs": int(api.get("active_runs") or 0),
             "reachable": got["status"][0] == 200,
             "running": st.get("gateway_running") if st else None, "state": st.get("gateway_state"), "busy": real > 0,
             "active_agents": real, "gateway_busy": bool(st.get("gateway_busy")), "gateway_agents": st.get("active_agents", 0), "version": st.get("version"),
@@ -243,6 +308,36 @@ class Overview:
                       "calls": tot.get("total_api_calls"), "tokens_in": tot.get("total_input"), "tokens_out": tot.get("total_output")},
             "days": days, "tools": tools, "recent": sessions, "board": board_summary(board),
         }
+
+    async def tool_activity(self) -> dict:
+        """The agent's most recent tool call, by kind and time (names and times only, never arguments). Cached for a few seconds,
+        so every open page asking at once costs one look at Hermes."""
+        now = time.time()
+        cached = getattr(self, "_tool_cache", None)
+        if cached and now - cached[0] < 3:
+            return cached[1]
+        # look past the empty scheduled check-ins that Hermes opens every few minutes: only sessions with messages can hold tool calls
+        status, data = await self.hermes.dash_json("/api/sessions?limit=15")
+        sessions = (data.get("sessions", []) if isinstance(data, dict) else data) if status == 200 and data else []
+        sessions = [s for s in sessions if isinstance(s, dict) and s.get("id") and int(s.get("message_count") or 0) > 0]
+        sessions.sort(key=lambda s: -(_to_ms(s.get("last_active")) or 0))
+        sessions = sessions[:3]
+        got = await asyncio.gather(*[self.hermes.dash_json("/api/sessions/%s/messages?limit=40&order=latest" % s["id"]) for s in sessions])
+        calls = []
+        for st, body in got:
+            msgs = (body.get("messages", []) if isinstance(body, dict) else body) if st == 200 and body else []
+            for m in msgs:
+                if not isinstance(m, dict):
+                    continue
+                for tc in m.get("tool_calls") or []:
+                    name = ((tc or {}).get("function") or {}).get("name") if isinstance(tc, dict) else None
+                    at = _to_ms(m.get("timestamp"))
+                    if name and at:
+                        calls.append({"name": str(name)[:60], "kind": tool_kind(name), "at": at})
+        calls.sort(key=lambda c: -c["at"])
+        out = {"latest": calls[0] if calls else None, "recent": calls[:8]}
+        self._tool_cache = (now, out)
+        return out
 
     async def home(self, infra: bool, today: datetime.date | None = None, now: float | None = None, personal: bool = True) -> dict:
         """infra: may see the server's health. personal: may see the install's own notes, jobs, board and chats (owners)."""
@@ -261,6 +356,7 @@ class Overview:
         if running_jobs:
             agent["active_agents"] += running_jobs
             agent["busy"] = True
+        agent["doing"] = doing_sentence(agent.get("running_titles") or [], [j["name"] for j in jobs if str(j.get("state")) == "running"], agent.get("api_runs") or 0)
         daily = await asyncio.to_thread(_read, (self.vault / "Daily" / (today.isoformat() + ".md")) if self.vault else Path("/nonexistent"))
         radar = await asyncio.to_thread(latest_radar, self.vault)
         daylog = await asyncio.to_thread(latest_daylog, self.vault, today)

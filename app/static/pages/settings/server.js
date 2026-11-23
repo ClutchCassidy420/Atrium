@@ -102,8 +102,7 @@
     }, [msg]);
     var live = !!((data && ((data.update && data.update.running) || data.scheduled)) || (cdata && (cdata.op || cdata.checking)) || went);
     useEffect(function () {
-      var id = setInterval(function () { load(); setTick(function (n) { return n + 1; }); }, live ? 2500 : 20000);
-      return function () { clearInterval(id); };
+      return window.atriumEvery(function () { load(); setTick(function (n) { return n + 1; }); }, live ? 2500 : 20000);
     }, [live]);
     useEffect(function () {      // a half second beat for the countdown text
       if (!(data && data.scheduled)) return undefined;
@@ -147,8 +146,7 @@
     /* ---- recently updated (with Roll back) ---- */
     var recent = [];
     if (cd) Object.keys(cd.restore_points || {}).forEach(function (proj) {
-      var p = (cd.projects || []).filter(function (x) { return x.project === proj; })[0];
-      if (p) recent.push({ key: "rb:" + proj, project: proj, created: cd.restore_points[proj].created });
+      recent.push({ key: "rb:" + proj, project: proj, created: cd.restore_points[proj].created });
     });
     recent.sort(function (a, b) { return b.created - a.created; });
 

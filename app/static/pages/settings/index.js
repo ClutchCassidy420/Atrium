@@ -270,6 +270,38 @@
         h("a", { className: "ats-btn", href: "/agent-workflows" }, "Workflows")));
   }
 
+  /* ---------- appearance: the color theme (saved per person, applied at once) ---------- */
+
+  function Appearance() {
+    var t_ = useState(null), data = t_[0], setData = t_[1];
+    var m_ = useState(""), msg = m_[0], setMsg = m_[1];
+    useEffect(function () { fetchJSON("/api/themes").then(setData).catch(function (e) { setMsg(errText(e)); }); }, []);
+    function apply(id, dflt) {
+      var root = document.documentElement;
+      if (!id || id === dflt) root.removeAttribute("data-theme"); else root.setAttribute("data-theme", id);
+    }
+    function pick(id) {
+      if (!data || id === data.current) return;
+      var before = data.current;
+      apply(id, data.default); setData(Object.assign({}, data, { current: id })); setMsg("");
+      fetchJSON("/api/theme", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ theme: id }) })
+        .then(function () { setMsg("Saved. This is your theme on every device you sign in on."); })
+        .catch(function (e) { apply(before, data.default); setData(Object.assign({}, data, { current: before })); setMsg(errText(e)); });
+    }
+    if (!data) return h("div", { className: "ats-card" }, msg ? h("div", { className: "ats-err" }, msg) : h("div", { className: "ats-note" }, "Loading themes…"));
+    return h("div", { className: "ats-card" },
+      h("div", { className: "ats-h" }, "Color theme"),
+      h("div", { className: "ats-note" }, "Pick the colors you like. It changes how everything looks for you and for nobody else."),
+      h("div", { className: "ats-themes", role: "radiogroup", "aria-label": "Color theme" }, data.themes.map(function (th) {
+        var on = th.id === data.current;
+        return h("button", { key: th.id, type: "button", role: "radio", "aria-checked": on ? "true" : "false", className: "ats-theme" + (on ? " ats-theme-on" : ""), onClick: function () { pick(th.id); } },
+          h("span", { className: "ats-swatch", "aria-hidden": "true" }, th.swatch.map(function (c, i) { return h("i", { key: i, style: { background: c } }); })),
+          h("span", { className: "ats-theme-name" }, th.label, on ? h("em", null, "In use") : null),
+          h("span", { className: "ats-theme-note" }, th.note));
+      })),
+      msg ? h("div", { className: /^Saved/.test(msg) ? "ats-msg" : "ats-err", role: "status" }, msg) : null);
+  }
+
   function embed(key, missing) {      // another framework page shown inside a Settings section
     return function Embedded() {
       var C = window.__APP_SUBPAGES__ && window.__APP_SUBPAGES__[key];
@@ -277,20 +309,226 @@
     };
   }
 
+  function ConnectCard(props) {
+    var entry = props.entry;
+    function submit(event) {
+      event.preventDefault();
+      var form = event.currentTarget;
+      var env = {};
+      new FormData(form).forEach(function (value, key) {
+        if (value) env[key] = value;
+      });
+      form.reset();
+      props.connect(entry.name, env);
+    }
+    return h("div", { className: "ats-row ats-connection" },
+      h("h4", { className: "ats-row-t" }, entry.name),
+      entry.description && h("p", { className: "ats-note" }, entry.description),
+      entry.host && h("p", { className: "ats-note" }, entry.host),
+      entry.installed || props.installed ? h("div", { className: "ats-note" }, "Installed") :
+        entry.blocked ? h("div", { className: "ats-note" }, entry.blocked) :
+          h("form", { onSubmit: submit },
+            entry.fields.map(function (field) {
+              return h("label", { key: field.name, className: "ats-connection-field" }, field.label,
+                h("input", { name: field.name, type: "password", autoComplete: "off",
+                  required: field.required, maxLength: 8192, disabled: props.disabled, className: "ats-input" }));
+            }),
+            h("button", { type: "submit", className: "ats-btn", disabled: props.disabled }, "Connect")));
+  }
+
+  function Connections() {
+    var catalogState = useState(null), catalog = catalogState[0], setCatalog = catalogState[1];
+    var installedState = useState(null), installed = installedState[0], setInstalled = installedState[1];
+    var filterState = useState(""), filter = filterState[0], setFilter = filterState[1];
+    var busyState = useState(false), busy = busyState[0], setBusy = busyState[1];
+    var resultState = useState(null), result = resultState[0], setResult = resultState[1];
+    var messageState = useState(""), message = messageState[0], setMessage = messageState[1];
+    var base = API + "/connections";
+
+    function read(path, key, set) {
+      return fetchJSON(base + path).then(function (data) { set({ rows: data[key] }); },
+        function (error) { set({ error: errText(error) }); });
+    }
+    function refresh() {
+      return Promise.all([read("/catalog", "entries", setCatalog), read("/installed", "servers", setInstalled)]);
+    }
+    useEffect(function () { refresh(); }, []);
+    function run(name, suffix, method, body, success) {
+      setMessage("");
+      setResult(null);
+      setBusy(true);
+      var options = { method: method };
+      if (body) {
+        options.headers = { "Content-Type": "application/json" };
+        options.body = JSON.stringify(body);
+      }
+      return fetchJSON(base + "/" + encodeURIComponent(name) + suffix, options).then(function (data) {
+        if (suffix === "/test") {
+          setResult({ name: name, tools: data.tools });
+          return;
+        }
+        setMessage(success);
+        return refresh();
+      }).catch(function (error) {
+        setMessage(errText(error));
+        if (suffix !== "/test") return refresh();
+      }).finally(function () { setBusy(false); });
+    }
+    function connect(name, env) {
+      return run(name, "/connect", "POST", { env: env }, name + " connected. Test it, then start a fresh chat to use its tools.");
+    }
+    var installedNames = new Set(installed && installed.rows ? installed.rows.map(function (server) { return server.name; }) : []);
+    var matching = catalog && catalog.rows && catalog.rows.filter(function (entry) {
+      return (entry.name + " " + entry.description).toLowerCase().includes(filter.trim().toLowerCase());
+    });
+
+    return h(SDK.React.Fragment, null,
+      h("div", { role: "status", className: "ats-note" }, busy ? "Working…" : message),
+      h("div", { className: "ats-card" },
+        h("h3", { className: "ats-h" }, "Installed connections"),
+        h("p", { className: "ats-note" }, "Test a connection to see which tools its server offers."),
+        h("button", { type: "button", className: "ats-btn", disabled: busy, onClick: function () {
+          setBusy(true);
+          setMessage("");
+          setResult(null);
+          refresh().finally(function () { setBusy(false); });
+        } }, "Refresh"),
+        !installed ? h("p", { className: "ats-note" }, "Loading…") :
+          installed.error ? h("p", { role: "alert", className: "ats-note" }, installed.error) :
+            !installed.rows.length ? h("p", { className: "ats-note" }, "No installed connections.") :
+              installed.rows.map(function (server) {
+                return h("div", { key: server.name, className: "ats-row ats-connection" },
+                  h("h4", { className: "ats-row-t" }, server.name),
+                  h("p", { className: "ats-note" }, (server.enabled ? "Enabled" : "Disabled") +
+                    (server.managed ? " · Managed by a Hermes plugin" : "")),
+                  h("div", { className: "ats-actions ats-wrap" },
+                    h("button", { type: "button", className: "ats-btn", disabled: busy, onClick: function () {
+                      run(server.name, "/test", "POST");
+                    } }, "Test"),
+                    !server.managed && h("button", { type: "button", className: "ats-btn", disabled: busy, onClick: function () {
+                      run(server.name, "/enabled", "PUT", { enabled: !server.enabled },
+                        server.name + (server.enabled ? " disabled." : " enabled."));
+                    } }, server.enabled ? "Disable" : "Enable"),
+                    !server.managed && h("button", { type: "button", className: "ats-btn", disabled: busy, onClick: function () {
+                      if (window.confirm("Remove " + server.name + "? Hermes may retain saved credentials.")) run(server.name, "", "DELETE", null, server.name + " removed.");
+                    } }, "Remove")),
+                  result && result.name === server.name && h("div", { role: "status" },
+                    h("p", { className: "ats-note" }, result.tools.length ? "Tools discovered. If a new chat cannot find one yet, wait about a minute and start another chat." : "Connection succeeded. Hermes discovered no tools."),
+                    result.tools.length > 0 && h("ul", null, result.tools.map(function (tool, index) {
+                      return h("li", { key: index }, tool);
+                    }))));
+              })),
+      h("div", { className: "ats-card" },
+        h("h3", { className: "ats-h" }, "Hermes MCP catalog"),
+        !catalog ? h("p", { className: "ats-note" }, "Loading…") :
+          catalog.error ? h("p", { role: "alert", className: "ats-note" }, catalog.error) :
+            h(SDK.React.Fragment, null,
+              h("label", { className: "ats-connection-field" }, "Find a connection",
+                h("input", { type: "search", className: "ats-input", value: filter,
+                  onChange: function (event) { setFilter(event.target.value); } })),
+              !matching.length && h("p", { className: "ats-note" }, "No matching connections."),
+              matching.map(function (entry) {
+                return h(ConnectCard, { key: entry.name, entry: entry, installed: installedNames.has(entry.name),
+                  disabled: busy || !installed || !!installed.error, connect: connect });
+              }))));
+  }
+
+  function ChatModel() {
+    var status = useState(""), busy = useState(false);
+    useEffect(function () {
+      fetchJSON(API + "/model").then(function (r) {
+        status[1](r.model ? "Current model: " + r.model : "Choose your first model.");
+      }).catch(function (e) { status[1](errText(e)); });
+    }, []);
+    function save(event) {
+      event.preventDefault();
+      var form = event.currentTarget;
+      var body = Object.fromEntries(new FormData(form));
+      form.elements.api_key.value = "";
+      busy[1](true);
+      post(API + "/model", body).then(function (r) {
+        if (!r.confirm_required) return r;
+        if (!window.confirm("The runtime flagged this model as potentially expensive. Use it for new chats?")) return {};
+        body.confirm = true;
+        return post(API + "/model", body);
+      }).then(function (r) {
+        status[1](r.ok ? "Saved " + body.model + ". Start a new chat to use it." : "Model selection cancelled.");
+      }).catch(function (e) { status[1](errText(e)); }).finally(function () { busy[1](false); });
+    }
+    function field(name, label, type, required) {
+      return h("label", { className: "ats-connection-field" }, label,
+        h("input", { className: "ats-input", name: name, type: type, required: required, autoComplete: "off" }));
+    }
+    return h("form", { className: "ats-card", onSubmit: save },
+      field("base_url", "API base URL (include /v1 if required)", "url", true),
+      field("model", "Model ID", "text", true),
+      field("api_key", "API key (if required)", "password", false),
+      h("button", { className: "ats-btn", disabled: busy[0], type: "submit" }, busy[0] ? "Saving…" : "Use model"),
+      h("p", { role: "status", className: "ats-note" }, status[0]));
+  }
+
+  /* ---------- your own chat model: the install's default, or a model from a cloud provider that is already connected ---------- */
+
+  function MyChatModel() {
+    var d_ = useState(null), data = d_[0], setData = d_[1];
+    var p_ = useState(""), pick = p_[0], setPick = p_[1];
+    var m_ = useState(""), msg = m_[0], setMsg = m_[1];
+    var b_ = useState(false), busy = b_[0], setBusy = b_[1];
+    function refresh() { return fetchJSON(API + "/models").then(setData).catch(function (e) { setMsg(errText(e)); }); }
+    useEffect(function () { refresh(); }, []);
+    if (!data) return h("div", { className: "ats-card", role: "status" }, msg || "Loading models…");
+    var eng = data.engine || {}, cloud = eng.engine === "cloud";
+    var selected = pick || (cloud ? eng.provider + "::" + eng.model : "default");
+    function apply() {
+      var parts = selected.split("::");
+      if (parts.length > 1 && !window.confirm("Use this cloud model? What you type in chat is sent to " + parts[0] + ".")) return;
+      setBusy(true); setMsg("");
+      var change = parts.length > 1 ? post(API + "/models", { provider: parts.shift(), id: parts.join("::"), confirm: true }) : post(API + "/models/use-default", {});
+      change.then(function () { setPick(""); setMsg("Saved."); return refresh(); }).catch(function (e) { setMsg(errText(e)); }).finally(function () { setBusy(false); });
+    }
+    var groups = (data.cloud || []).map(function (provider) {
+      return h("optgroup", { key: provider.id, label: provider.label }, provider.models.map(function (model) {
+        return h("option", { key: model, value: provider.id + "::" + model }, model);
+      }));
+    });
+    return h("div", { className: "ats-card" },
+      h("div", { className: "ats-h" }, "Your chat model"),
+      h("div", { className: "ats-note" }, cloud ? "Your chats use " + eng.model + " from " + eng.provider + "." : "Your chats use this install's default model. You can pick a model from a connected cloud provider instead; it applies to you only."),
+      h("div", { className: "ats-row" },
+        h("select", { value: selected, className: "ats-btn", "aria-label": "Your chat model", disabled: busy, onChange: function (event) { setPick(event.target.value); } },
+          h("option", { value: "default" }, "This install's default model"), groups),
+        h("button", { type: "button", className: "ats-btn", disabled: busy, onClick: apply }, "Use model")),
+      !(data.cloud || []).length ? h("div", { className: "ats-note" }, "No cloud provider is connected to the agent yet. Connect one in the agent's own settings, then it appears here.") : null,
+      msg ? h("div", { className: /^Saved/.test(msg) ? "ats-msg" : "ats-err", role: "status" }, msg) : null);
+  }
+
   var SECTIONS = [
     { id: "general", label: "General", icon: "🛠️", note: "Your agent's name and voice, and shortcuts to the other pages.", parts: [AgentCard, VoiceCard, Shortcuts, Account] },
+    { id: "appearance", label: "Appearance", icon: "🌈", note: "The colors of the app. Your choice follows you to every device.", parts: [Appearance] },
     { id: "notifications", label: "Notifications", icon: "🔔", note: "What is allowed to buzz your phone, and which devices get it.", parts: [Notifications, Devices] },
     { id: "schedule", label: "Schedule", icon: "⏰", note: "When each of the agent's jobs runs.", parts: [Schedule] },
     { id: "persona", label: "Persona", icon: "🎭", note: "Who the agent is and the rules she works by, with every earlier version kept.", parts: [embed("persona", "The persona editor did not load.")] },
     { id: "avatar", label: "Avatar", icon: "🎨", note: "Pick and customise how the agent looks.", parts: [embed("avatar", "The avatar editor did not load.")] },
     { id: "memory", label: "Memory", icon: "🧠", note: "The agent's notes as a graph: every note a dot, every link a line. Read only.", parts: [embed("memory", "The memory view did not load.")] },
     { id: "engine", label: "Cloud use", icon: "☁️", note: "Which engine answers chats from the app, and what the cloud has used.", parts: [Cloud] },
+    { id: "model", label: "Chat model", icon: "🧠", note: "Choose an OpenAI-compatible endpoint for new chats.", parts: [ChatModel, MyChatModel] },
+    { id: "connections", label: "Connections", icon: "🔌", note: "Connect external tools to Hermes.", parts: [Connections] },
     { id: "server", label: "Server", icon: "🖥️", note: "Install updates, reboot or shut down the machine this runs on. Owners only.", parts: [embed("server", "The server actions did not load.")], hostOnly: true }
   ];
 
+  function allSections() {      // an install can add sections: window.__APP_SETTINGS_SECTIONS__.push({ id, label, icon, note, parts: [Component], replaces: "model" })
+    var extra = (Array.isArray(window.__APP_SETTINGS_SECTIONS__) ? window.__APP_SETTINGS_SECTIONS__ : []).filter(function (x) {
+      return x && typeof x.id === "string" && typeof x.label === "string" && Array.isArray(x.parts);
+    });
+    var taken = SECTIONS.map(function (x) { return x.id; });
+    var added = extra.filter(function (x) { return taken.indexOf(x.id) < 0; });
+    var replaced = added.map(function (x) { return x.replaces; });
+    return SECTIONS.filter(function (x) { return replaced.indexOf(x.id) < 0; }).concat(added);
+  }
+
   function startSection() {
     var id = (window.location.hash || "").replace(/^#/, "");
-    return SECTIONS.some(function (x) { return x.id === id; }) ? id : SECTIONS[0].id;
+    return allSections().some(function (x) { return x.id === id; }) ? id : SECTIONS[0].id;
   }
 
   function Page() {
@@ -304,7 +542,7 @@
     useEffect(function () {
       fetchJSON("/api/host/status").then(function (j) { setHostOn(!!(j && j.enabled)); }).catch(function () { /* stays hidden */ });
     }, []);
-    var visible = SECTIONS.filter(function (x) { return !x.hostOnly || hostOn; });
+    var visible = allSections().filter(function (x) { return !x.hostOnly || hostOn; });
     function pick(id) { setCur(id); try { window.history.replaceState(null, "", "#" + id); } catch (x) { /* ignore */ } }
     var sec = visible.filter(function (x) { return x.id === cur; })[0] || visible[0];
     return h("div", { className: "ats-page" },
@@ -312,7 +550,7 @@
       h("div", { className: "ats-layout" },
         h("nav", { className: "ats-nav", "aria-label": "Settings sections" }, visible.map(function (x) {
           return h("button", { key: x.id, type: "button", className: "ats-navitem" + (x.id === sec.id ? " ats-current" : ""), "aria-current": x.id === sec.id ? "page" : null, onClick: function () { pick(x.id); } },
-            h("span", { className: "ats-navicon", "aria-hidden": "true", style: { "--h": ({ general: 215, notifications: 40, schedule: 150, persona: 320, avatar: 275, memory: 185, engine: 205, server: 25 })[x.id] || 260 } }, x.icon), x.label);
+            h("span", { className: "ats-navicon", "aria-hidden": "true", style: { "--h": ({ general: 215, appearance: 300, notifications: 40, schedule: 150, persona: 320, avatar: 275, memory: 185, engine: 205, server: 25 })[x.id] || 260 } }, x.icon), x.label);
         })),
         h("section", { className: "ats-panel", key: sec.id },
           h("h2", { className: "ats-panel-h" }, sec.label),

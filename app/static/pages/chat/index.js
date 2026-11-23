@@ -567,9 +567,71 @@
       })(0);
     }
 
+    /* Live mode: speak each sentence as soon as it has printed, while the rest of the answer is still arriving. */
+    var LIVE = window.__APP_CHAT_LIVE__, live = null;
+    function liveStart(key, limit) {
+      token++; cleanup();
+      live = { key: key, my: token, raw: "", ptr: 0, queue: [], busy: false, done: false, spent: 0, limit: limit || 2000, started: false };
+    }
+    function liveIdle(L) { if (live === L && L.done && !L.busy && !L.queue.length) { cleanup(); live = null; set("", "idle"); } }
+    function livePump(L) {
+      if (live !== L || L.busy || L.my !== token) return;
+      var item = L.queue.shift();
+      if (!item) { liveIdle(L); return; }
+      L.busy = true;
+      item.then(function (url) {
+        if (L.my !== token) return null;
+        audio = new Audio(url);
+        return audio.play().then(function () {
+          if (L.my !== token) return null;
+          set(L.key, "playing");
+          return new Promise(function (resolve) { audio.onended = resolve; audio.onerror = resolve; });
+        });
+      }).catch(function (e) {
+        if (L.my !== token) return;
+        if (e && e.name === "NotAllowedError") { pending = { key: L.key, text: L.raw, limit: L.limit }; L.queue = []; L.done = true; cleanup(); live = null; set(L.key, "blocked"); L.dead = true; }
+        else { L.queue = []; L.done = true; cleanup(); live = null; set(L.key, "error"); L.dead = true; }
+      }).then(function () {
+        if (L.dead || L.my !== token) return;
+        L.busy = false; livePump(L);
+      });
+    }
+    function liveQueue(L, rawSeg) {
+      var parts = chunks(speechText(rawSeg));
+      parts.forEach(function (p) {
+        if (L.spent >= L.limit) return;
+        L.spent += p.length;
+        if (!L.started) { L.started = true; set(L.key, "loading"); }
+        var pr = fetchAudio(p); pr.catch(function () { /* handled when played */ });
+        L.queue.push(pr);
+      });
+      livePump(L);
+    }
+    function liveCut(raw, from, final) { return LIVE.cut(raw, from, final); }
+    function liveFeed(delta) {
+      var L = live; if (!L || L.done || L.my !== token) return;
+      L.raw += delta;
+      var cut = liveCut(L.raw, L.ptr, false);
+      // wait for a few words so the voice does not stutter on tiny pieces
+      if (cut > L.ptr && speechText(L.raw.slice(L.ptr, cut)).length >= (L.started ? LIVE.MIN_NEXT : LIVE.MIN_FIRST)) {
+        var seg = L.raw.slice(L.ptr, cut); L.ptr = cut; liveQueue(L, seg);
+      }
+    }
+    function liveEnd(finalText) {
+      var L = live; if (!L || L.my !== token) return false;
+      if (finalText && finalText.length >= L.raw.length) L.raw = finalText;
+      L.done = true;
+      var rest = L.raw.slice(L.ptr); L.ptr = L.raw.length;
+      if (rest.trim()) liveQueue(L, rest);
+      livePump(L); liveIdle(L);
+      return true;
+    }
+
     return {
-      speak: function (key, text, limit, voice) { run(key, text, limit || 6000, voice); },
-      stop: stop,
+      liveStart: liveStart, liveFeed: liveFeed, liveEnd: liveEnd,
+      liveActive: function () { return !!live; },
+      speak: function (key, text, limit, voice) { live = null; run(key, text, limit || 6000, voice); },
+      stop: function () { live = null; stop(); },
       plain: speechText,
       resume: function () { var p = pending; pending = null; if (p) run(p.key, p.text, p.limit, p.voice); },
       state: function () { return { key: curKey, status: status }; },
@@ -640,21 +702,15 @@
             mineSpeaking ? (vs.status === "loading" ? "Loading…" : "■ Stop") : "🔊 Listen") : null) : null));
   }
 
+  var ApprovalCard = window.__APP_CHAT_APPROVAL__.makeCard({ h: h, useState: useState, useRef: useRef, errText: errText });
+
   function Approvals(props) {
     var list = props.controls || [];
     if (!list.length) return null;
-    return h("div", { className: "atc-approvals" }, list.map(function (c, i) {
-      var rid = c.request_id || c.id;
-      var label = c.title || c.label || c.command || c.tool || "{{agent}} is asking for permission";
-      var detail = c.detail || c.description || c.command || "";
-      return h("div", { key: rid || i, className: "atc-approval" },
-        h("div", { className: "atc-approval-title" }, "Needs your OK"),
-        h("div", { className: "atc-approval-label" }, String(label).slice(0, 200)),
-        detail && detail !== label ? h("pre", { className: "atc-approval-detail" }, String(detail).slice(0, 800)) : null,
-        rid ? h("div", { className: "atc-approval-actions" },
-          h("button", { type: "button", className: "atc-btn atc-btn-primary", onClick: function () { props.onChoose(c, rid, "once"); } }, "Approve once"),
-          h("button", { type: "button", className: "atc-btn", onClick: function () { props.onChoose(c, rid, "deny"); } }, "Deny"))
-          : h("div", { className: "atc-muted" }, "Open the built-in chat to answer this one."));
+    return h("div", { className: "atc-approvals" }, list.map(function (control, index) {
+      var id = control.prompt_id || control.request_id || control.id || index;
+      var key = [props.runId, control.execution_generation, id].join(":");
+      return h(ApprovalCard, { key: key, control: control, runId: props.runId, onChoose: props.onChoose });
     }));
   }
 
@@ -1322,11 +1378,13 @@
       setRun(null);
       if (stopStreamRef.current) { stopStreamRef.current(); stopStreamRef.current = null; }
       var chat = curRef.current;
+      if (ended && Voice.liveActive()) Voice.stop();
       if (!ended && readAloudOn() && !window.__ATRIUM_AVATAR__) {
         var lastA = null;
         for (var q = chat.msgs.length - 1; q >= 0; q--) if (chat.msgs[q].role === "assistant") { lastA = chat.msgs[q]; break; }
         var spoken = (res && res.output) ? res.output : (lastA ? lastA.text : "");
-        if (spoken) Voice.speak(msgKey({ text: spoken }), spoken, 2000);
+        if (Voice.liveActive()) Voice.liveEnd(spoken);
+        else if (spoken) Voice.speak(msgKey({ text: spoken }), spoken, 2000);
       }
       if (res && res.status === "failed") { try { window.dispatchEvent(new CustomEvent("atrium:avatar-event", { detail: { kind: "error" } })); } catch (x) { /* old browser */ } }
       // her avatar, when it is on stage, gives the answer: with sound on she says it (and the plain voice above stays quiet), with sound off she types it
@@ -1352,6 +1410,7 @@
       var k = ev && ev.event;
       if (k === "message.delta" && typeof ev.delta === "string") {
         updateLast(function (m) { return { role: "assistant", text: (m.text || "") + ev.delta, tools: m.tools, streaming: true, error: null }; });
+        if (Voice.liveActive()) Voice.liveFeed(ev.delta);
       } else if (k === "tool.started") {
         updateLast(function (m) {
           var tools = (m.tools || []).concat([{ id: ev.tool_call_id || String(Math.random()), name: String(ev.tool || "tool"), preview: String(ev.preview || ""), status: "running" }]);
@@ -1406,6 +1465,7 @@
       });
       setDraft(""); setFiles([]); setImages([]); setDocs([]);
       setRun({ id: "", pending: [] });
+      if (readAloudOn() && !window.__ATRIUM_AVATAR__ && Voice.available()) Voice.liveStart("live", 2000); else Voice.stop();
       try { window.dispatchEvent(new CustomEvent("atrium:avatar-event", { detail: { kind: "send", text: text } })); } catch (x) { /* old browser */ }
       postJSON("/send", { session_id: id, message: full, images: sentImages }).then(function (res) {
         var rid = res.run_id;
@@ -1424,13 +1484,13 @@
       postJSON("/runs/" + encodeURIComponent(rr.id) + "/stop", {}).then(function () {}, function (e) { setErr(errText(e)); });
     }
 
-    function choose(ctrl, rid, choice) {
+    function choose(ctrl, rid, choice, shownRunId) {
       var rr = runRef.current;
-      if (!rr || !rr.id) return;
+      if (!rr || rr.id !== shownRunId) return Promise.reject(new Error("This approval is no longer pending."));
       var gen = ctrl.execution_generation != null ? ctrl.execution_generation : rr.gen;
       var body = { request_id: String(rid), choice: choice };
       if (gen != null) body.execution_generation = gen;
-      postJSON("/runs/" + encodeURIComponent(rr.id) + "/approval", body).then(function () {}, function (e) { setErr(errText(e)); });
+      return postJSON("/runs/" + encodeURIComponent(rr.id) + "/approval", body);
     }
 
     /* chats: new / open / rename / delete */
@@ -1629,7 +1689,7 @@
           loadingChat ? h("div", { className: "atc-muted atc-pad" }, "Opening chat…") : null,
           h("div", { className: "atc-msgs" },
             cur.msgs.map(function (m, i) { return h(Message, { key: i, msg: m, onZoom: setZoom }); }),
-            busy ? h(Approvals, { controls: run && run.pending, onChoose: choose }) : null)),
+            busy ? h(Approvals, { controls: run && run.pending, runId: run && run.id, onChoose: choose }) : null)),
           showAvatarComp
             ? h("div", { className: "atc-companion atc-companion-avatar" + (showEmpty ? " atc-companion-away" : ""), "aria-hidden": "true" }, h(UIx.AvatarHero, { state: companionState, compact: true, onFail: function () { setAvFailed(true); } }))
             : showCompanion ? h("div", { className: "atc-companion", "aria-hidden": "true" }, h(UIx.Orb, { state: companionState })) : null),

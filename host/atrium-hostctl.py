@@ -80,6 +80,8 @@ def recent_log(n: int = 10) -> list[dict]:
 
 def upgradable() -> list[dict]:
     code, out = run(["apt", "list", "--upgradable"], 60, {"LC_ALL": "C"})
+    if code:
+        raise RuntimeError("Could not list pending package updates.")
     rows = []
     for line in out.splitlines():
         m = re.match(r"^([^/\s]+)/\S+\s+(\S+)\s+\S+\s+\[upgradable from: ([^\]]+)\]", line)
@@ -151,7 +153,10 @@ def start_update(kind: str, user: str) -> tuple[int, dict]:
     if power_state():
         return 409, {"error": "A reboot or shutdown is scheduled. Cancel it first."}
     _cache["v"] = None
-    names = [p["name"] for p in packages()["care" if kind == "update_care" else "safe"]]
+    try:
+        names = [p["name"] for p in packages()["care" if kind == "update_care" else "safe"]]
+    except RuntimeError as exc:
+        return 503, {"error": str(exc)}
     if not names:
         return 409, {"error": "Nothing is waiting in that group."}
     STATE.mkdir(parents=True, exist_ok=True)
@@ -210,13 +215,20 @@ def run_update(kind: str) -> int:
     before = containers()
     env = {"DEBIAN_FRONTEND": "noninteractive", "NEEDRESTART_MODE": "l", "LC_ALL": "C"}
     progress("refreshing the package lists")
-    run(["apt-get", "update", "-qq"], 300, env)
+    refresh, _ = run(["apt-get", "update", "-qq", "-o", "APT::Update::Error-Mode=any"], 300, env)
     _cache["v"] = None
-    names = [p["name"] for p in packages()["care" if kind == "update_care" else "safe"]]
-    result = {"kind": kind, "user": user, "started": started, "packages": names, "ok": False, "dry_run": DRY}
-    if not names:
-        result.update(ok=True, note="Nothing was waiting.")
-    else:
+    result = {"kind": kind, "user": user, "started": started, "packages": [], "ok": False, "dry_run": DRY}
+    names = []
+    try:
+        if refresh:
+            raise RuntimeError("Could not refresh package indexes.")
+        names = [p["name"] for p in packages()["care" if kind == "update_care" else "safe"]]
+        result["packages"] = names
+        if not names:
+            result.update(ok=True, note="Nothing was waiting.")
+    except RuntimeError as exc:
+        result["note"] = str(exc)
+    if names:
         progress("installing %d packages" % len(names), total=len(names))
         cmd = ["apt-get", "install", "-y", "--only-upgrade", "-o", "Dpkg::Options::=--force-confold"] + (["-s"] if DRY else []) + names
         code, out = run(cmd, 1800, env)
@@ -228,6 +240,8 @@ def run_update(kind: str) -> int:
     after = containers()
     result["containers_before"], result["containers_after"] = len(before), len(after)
     result["containers_missing"] = sorted(set(before) - set(after))
+    if result["containers_missing"]:
+        result.update(ok=False, note="Some previously running containers are missing.")
     result["reboot_required"] = Path("/var/run/reboot-required").exists()
     result["finished"] = now()
     (STATE / "last-update.json").write_text(json.dumps(result), encoding="utf-8")
@@ -537,7 +551,7 @@ def load_points(project: str | None = None) -> list[dict]:
 def prune_points() -> None:
     cutoff = now() - KEEP_DAYS * 86400
     for p in load_points():
-        if p.get("created", 0) < cutoff:
+        if p.get("created", 0) < cutoff and not p.get("recovery_pending"):
             for s in p.get("services", []):
                 run(["docker", "rmi", s["restore_tag"]], 30)
             shutil.rmtree(restore_dir() / p["id"], ignore_errors=True)
@@ -601,7 +615,7 @@ def start_container_op(op: str, project: str, user: str) -> tuple[int, dict]:
     return (200, {"ok": True}) if code == 0 else (500, {"error": "Could not start the job."})
 
 
-def wait_healthy(project: str, svcs: list[str], baseline: dict, timeout: int | None = None, stable: int = 25) -> tuple[bool, str]:
+def wait_healthy(project: str, svcs: list[str], baseline: dict, timeout: int | None = None, stable: int = 25, expected_images: dict | None = None) -> tuple[bool, str]:
     """Every container of these services running (and healthy if it has a check), not restarting, and stable for a while."""
     deadline, good_since = now() + (timeout or HEALTH_TIMEOUT), None
     while now() < deadline:
@@ -621,7 +635,9 @@ def wait_healthy(project: str, svcs: list[str], baseline: dict, timeout: int | N
             for r in rows:
                 st = r.get("State") or {}
                 health = (st.get("Health") or {}).get("Status")
-                if not st.get("Running") or st.get("Restarting") or health in ("unhealthy", "starting"):
+                if expected_images and r.get("Image") != expected_images.get(svc):
+                    ok, why = False, svc + ": restored image does not match"
+                elif not st.get("Running") or st.get("Restarting") or health in ("unhealthy", "starting"):
                     ok, why = False, "%s is %s" % (svc, "restarting" if st.get("Restarting") else health or st.get("Status"))
                 elif r.get("RestartCount", 0) > baseline.get(r["Name"].lstrip("/"), 0):
                     ok, why = False, svc + " keeps restarting"
@@ -667,14 +683,14 @@ def run_container(op: str, project: str) -> int:
 
     groups = discover()
     g = groups.get(project)
-    if not g:
+    if op != "container_rollback" and not g:
         return finish(False, "that group is not running")
     cached = {p["project"]: p for p in container_state()["projects"]}.get(project, {})
-    base = {r["Name"].lstrip("/"): r.get("RestartCount", 0) for r in json.loads(run(["docker", "inspect"] + [c for s in g["services"].values() for c in s["containers"]], 60)[1] or "[]")}
 
     def abandon(point: dict) -> None:
         """An update that did not take leaves nothing to roll back to: forget its restore point."""
         point["rolled_back"] = True
+        point["recovery_pending"] = False
         try:
             (restore_dir() / point["id"] / "point.json").write_text(json.dumps(point), encoding="utf-8")
         except OSError:
@@ -682,27 +698,42 @@ def run_container(op: str, project: str) -> int:
 
     def do_rollback(point: dict, why: str) -> tuple[bool, str]:
         step("rolling back")
-        files = point.get("files", {})
-        for dest, saved in files.items():
-            Path(dest).write_text(Path(saved).read_text(encoding="utf-8"), encoding="utf-8")
-        svcs = [s["service"] for s in point["services"]]
-        for s in point["services"]:
-            if point["mode"] == "floating" and not DRY:
-                run(["docker", "tag", s["restore_tag"], s["ref"]], 30)       # the old build becomes the tag again
-            if s.get("track") and not DRY:
-                run(["docker", "tag", s["restore_tag"], s["track"]], 30)     # an image fixed to a digest keeps the tag it is followed by
         if not DRY:
-            run(compose_args(g) + ["up", "-d", "--no-deps", "--pull", "never"] + svcs, 300)
-        ok, bad = (True, "") if DRY else wait_healthy(project, svcs, {}, 120, 15)
-        return ok, ("rolled back" if ok else "rolled back but %s" % bad)
+            point["recovery_pending"] = True
+            (restore_dir() / point["id"] / "point.json").write_text(json.dumps(point), encoding="utf-8")
+        files = point.get("files", {})
+        saved_group = point.get("compose") or g
+        if not saved_group and files:
+            first = next(iter(files))
+            saved_group = {"project": project, "dir": str(Path(first).parent), "files": list(files)}
+        if not saved_group:
+            return False, "no saved Compose configuration"
+        if DRY:
+            return True, "rollback simulated"
+        for dest, saved in files.items():
+            Path(dest).write_bytes(Path(saved).read_bytes())
+        services = point["services"]
+        for service in services:
+            target = service["ref"] if service["kind"] == "floating" else service.get("track")
+            if target and run(["docker", "tag", service["restore_tag"], target], 30)[0]:
+                return False, "could not restore image tag for " + service["service"]
+        svcs = [s["service"] for s in services]
+        if run(compose_args(saved_group) + ["up", "-d", "--no-deps", "--pull", "never"] + svcs, 300)[0]:
+            return False, "could not recreate previous containers"
+        expected = {s["service"]: s["old_image_id"] for s in services}
+        ok, bad = wait_healthy(project, svcs, {}, 120, 15, expected_images=expected)
+        return ok, ("rolled back" if ok else "rollback unverified: " + bad)
 
     if op == "container_rollback":
+        if DRY:
+            return finish(True, "rollback simulated")
         pts = [p for p in load_points(project) if not p.get("rolled_back")]
         if not pts:
             return finish(False, "no restore point")
         point = pts[-1]
         ok, note = do_rollback(point, "asked")
         if ok:
+            point["recovery_pending"] = False
             point["rolled_back"] = True
             (restore_dir() / point["id"] / "point.json").write_text(json.dumps(point), encoding="utf-8")
         return finish(ok, note, restore_point=point["id"])
@@ -711,19 +742,24 @@ def run_container(op: str, project: str) -> int:
     todo = [x for x in cached.get("services", []) if x.get("update")]
     if not todo:
         return finish(False, "nothing to update here")
+    if DRY:
+        return finish(True, "update simulated")
+    base = {r["Name"].lstrip("/"): r.get("RestartCount", 0) for r in json.loads(run(["docker", "inspect"] + [c for s in g["services"].values() for c in s["containers"]], 60)[1] or "[]")}
     pid = time.strftime("%Y%m%d-%H%M%S", time.gmtime())
     pdir = restore_dir() / pid
     (pdir / "files").mkdir(parents=True, exist_ok=True)
     step("saving a restore point")
     point = {"id": pid, "project": project, "created": now(), "user": user, "mode": "pinned" if any(x["kind"] in ("pinned", "digest") for x in todo) else "floating", "services": [], "files": {}}
+    point["compose"] = {key: g[key] for key in ("project", "dir", "files")}
     for i, f in enumerate(g["files"]):
         saved = pdir / "files" / ("%d-%s" % (i, Path(f).name))
-        saved.write_text(Path(f).read_text(encoding="utf-8"), encoding="utf-8")
+        saved.write_bytes(Path(f).read_bytes())
         point["files"][f] = str(saved)
     for x in todo:
         s = g["services"][x["service"]]
         tag = "atrium-restore/%s-%s:%s" % (project, s["service"], pid)
-        run(["docker", "tag", s["image_id"], tag], 30)
+        if run(["docker", "tag", s["image_id"], tag], 30)[0]:
+            return finish(False, "could not save previous image for " + s["service"])
         point["services"].append({"service": s["service"], "ref": x["ref"], "old_image_id": s["image_id"], "restore_tag": tag, "kind": x["kind"], "track": s.get("track", "")})
     (pdir / "point.json").write_text(json.dumps(point), encoding="utf-8")
     svcs = [x["service"] for x in todo]
@@ -733,33 +769,38 @@ def run_container(op: str, project: str) -> int:
                 track = g["services"][x["service"]].get("track") or x.get("track", "")
                 nd = remote_digest(track) if track else ""
                 if not nd:
-                    do_rollback(point, "no digest")
-                    abandon(point)
+                    restored, _ = do_rollback(point, "no digest")
+                    if restored:
+                        abandon(point)
                     return finish(False, "could not find the newest build of " + (track or x["ref"]), restore_point=pid)
                 new_ref = x["ref"].split("@", 1)[0] + "@" + nd
                 if not any(edit_image_line(f, x["ref"], new_ref) for f in g["files"]):
-                    do_rollback(point, "could not edit")
-                    abandon(point)
+                    restored, _ = do_rollback(point, "could not edit")
+                    if restored:
+                        abandon(point)
                     return finish(False, "could not change the pinned build in the compose file", restore_point=pid)
                 x["new_ref"] = new_ref
                 code, out = run(["docker", "pull", track], 1800)           # the tag moves to the new build, and the new digest is on disk
                 if code != 0:
                     ok, note = do_rollback(point, "pull failed")
-                    abandon(point)
+                    if ok:
+                        abandon(point)
                     return finish(False, "pull failed (%s); %s" % (out.strip().splitlines()[-1][:100] if out.strip() else "", note), restore_point=pid)
             if x["kind"] == "pinned":
                 host, repo, tag = split_ref(x["ref"])
                 new_ref = x["ref"].rsplit(":", 1)[0] + ":" + x["newer"]
                 if not any(edit_image_line(f, x["ref"], new_ref) for f in g["files"]):
-                    do_rollback(point, "could not edit")
-                    abandon(point)
+                    restored, _ = do_rollback(point, "could not edit")
+                    if restored:
+                        abandon(point)
                     return finish(False, "could not change the version in the compose file", restore_point=pid)
                 x["new_ref"] = new_ref
         step("pulling the new build")
         code, out = run(compose_args(g) + ["pull"] + svcs, 1800)
         if code != 0:
             ok, note = do_rollback(point, "pull failed")
-            abandon(point)
+            if ok:
+                abandon(point)
             return finish(False, "pull failed (%s); %s" % (out.strip().splitlines()[-1][:100] if out.strip() else "", note), restore_point=pid)
         step("replacing the containers")
         code, out = run(compose_args(g) + ["up", "-d", "--no-deps"] + svcs, 600)
@@ -769,8 +810,9 @@ def run_container(op: str, project: str) -> int:
             ok, bad = wait_healthy(project, svcs, base)
         if not ok:
             rok, rnote = do_rollback(point, bad)
-            abandon(point)
-            return finish(False, "the new build failed (%s); %s" % (bad, rnote), restore_point=pid, auto_rolled_back=True)
+            if rok:
+                abandon(point)
+            return finish(False, "the new build failed (%s); %s" % (bad, rnote), restore_point=pid, auto_rolled_back=rok)
     prune_points()
     try:
         run_check(only=[project])
@@ -827,7 +869,10 @@ class H(BaseHTTPRequestHandler):
             return
         route = self.path.split("?")[0]
         if route == "/status":
-            return self.reply(200, status())
+            try:
+                return self.reply(200, status())
+            except RuntimeError as exc:
+                return self.reply(503, {"error": str(exc)})
         if route == "/containers":
             prune_points()
             return self.reply(200, container_state())

@@ -165,8 +165,7 @@
     var running = !!(jobs && jobs.some(function (x) { return x.running; }));
     useEffect(function () {
       load();
-      var iv = setInterval(load, running ? 6000 : 30000);
-      return function () { clearInterval(iv); };
+      return window.atriumEvery(load, running ? 6000 : 30000);
     }, [running]);
 
     function run(job) {

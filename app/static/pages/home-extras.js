@@ -13,8 +13,8 @@
       var dead = false;
       function load() { SDK.fetchJSON("/api/plugins/atrium-chat/actions").then(function (r) { if (!dead) setN((r.pending || []).length); }).catch(function () { /* approval service not available */ }); }
       load();
-      var iv = setInterval(load, 25000);
-      return function () { dead = true; clearInterval(iv); };
+      var stop = window.atriumEvery(load, 25000);
+      return function () { dead = true; stop(); };
     }, []);
     return h("a", { href: "/chat?approvals=1", className: "hm-style hm-appr", title: n ? n + " waiting for your approval" : "Things " + props.name + " wants your OK on" },
       "✉ Approvals", n ? h("span", { className: "hm-appr-n" }, String(n)) : null);
