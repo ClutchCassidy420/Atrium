@@ -34,8 +34,8 @@ the same checks. State lives in small JSON files under the data dir, written wit
 | 3 | Run-id regex and `public_run` re-implemented in `main.py`, `chat_backend`, `mission_backend`. | Validation drift = security drift. | Regex unified; `public_run` shapes still differ (see 5) |
 | 4 | Three HTTP stacks (urllib, httpx, http.client) and several hand-rolled clients (`hermes.py`, chat, mission, room, hostctl, live). | Inconsistent timeouts, error mapping, no connection reuse. | Open |
 | 5 | `chat_backend.py` is 1,400 lines mixing chat, uploads/extraction, push (VAPID crypto), notification prefs, voice, icon drawing, actions. | Hard to review or test; one import failure takes chat down. | Open |
-| 6 | ~12 hand-written atomic-write blocks, ~40 synchronous `read_text`/`json.load` calls inside async handlers. | Small event-loop stalls under load; inconsistent crash safety. | Helper added and used in 3 places; rest open |
-| 7 | `main.py` repeats `deny(...)` + `same_origin(...)` + body parsing in every route. | Easy to forget one check on a new route. | Open |
+| 6 | ~12 hand-written atomic-write blocks, ~40 synchronous `read_text`/`json.load` calls inside async handlers. | Small event-loop stalls under load; inconsistent crash safety. | Atomic writes **fixed** (one helper, secrets get 0o600 from creation); blocking reads open |
+| 7 | `main.py` repeated `deny(...)` + `same_origin(...)` in every route. | Easy to forget one check on a new route. | **Fixed in `main.py`** (`guard()`); the feature backends still have their own |
 | 8 | Module-level mutable state (`last_run`, `owner_of`, `_state`) lives in process memory. | Breaks with more than one worker; lost on restart (acceptable today, a limit for scaling). | Open, documented |
 | 9 | Front end: single 4.2k-line `engine.js`, no build step or bundling. | Slow first load of that page, hard to maintain. | Not reviewed in depth |
 

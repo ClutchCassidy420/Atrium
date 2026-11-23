@@ -146,6 +146,16 @@ def make_app(cfg: configmod.Config | None = None, hermes: Hermes | None = None, 
             return JSONResponse({"detail": "Not allowed for your role."}, status_code=403)
         return None
 
+    def guard(request: Request, permission: str, *, write: bool = False, plain_origin: bool = False, also=None):
+        """The checks every signed-in route needs, in one place and always in the same order:
+        signed in -> role -> ``also(who)`` (for example "is this your run") -> same origin (when the route changes something).
+        Returns (who, None) when the request may go on, or (None, the refusal to send back)."""
+        who = current(request)
+        refused = deny(who, permission) or (also(who) if also else None)
+        if not refused and write and not same_origin(request):
+            refused = PlainTextResponse("Bad origin.", status_code=403) if plain_origin else JSONResponse({"detail": "Bad origin."}, status_code=403)
+        return (None, refused) if refused else (who, None)
+
     @app.middleware("http")
     async def headers(request: Request, call_next):
         resp = await call_next(request)
@@ -232,8 +242,8 @@ def make_app(cfg: configmod.Config | None = None, hermes: Hermes | None = None, 
     # ---- signed-in routes ----------------------------------------------------------------------------------------
     @app.get("/api/me")
     async def me(request: Request):
-        who = current(request)
-        return deny(who, "use") or {"user": who["user"], "role": who["role"], "name": who["name"]}
+        who, refused = guard(request, "use")
+        return refused or {"user": who["user"], "role": who["role"], "name": who["name"]}
 
     def _clean_look(raw):
         """The saved avatar look: a flat dict of short settings. Anything else is refused."""
@@ -254,10 +264,9 @@ def make_app(cfg: configmod.Config | None = None, hermes: Hermes | None = None, 
     @app.get("/api/avatar-look")
     async def avatar_look_get(request: Request):
         """How the agent looks (one look for everyone, set by an owner). {"look": null} until one is saved."""
-        who = current(request)
-        denied = deny(who, "use")
-        if denied:
-            return denied
+        _, refused = guard(request, "use")
+        if refused:
+            return refused
         try:
             data = json.loads((cfg.data_dir / "avatar-look.json").read_text(encoding="utf-8"))
         except (OSError, ValueError):
@@ -266,12 +275,9 @@ def make_app(cfg: configmod.Config | None = None, hermes: Hermes | None = None, 
 
     @app.put("/api/avatar-look")
     async def avatar_look_put(request: Request):
-        who = current(request)
-        denied = deny(who, "admin")
-        if denied:
-            return denied
-        if not same_origin(request):
-            return PlainTextResponse("Bad origin.", status_code=403)
+        _, refused = guard(request, "admin", write=True, plain_origin=True)
+        if refused:
+            return refused
         try:
             look = _clean_look((await request.json()).get("look"))
         except Exception:
@@ -284,21 +290,17 @@ def make_app(cfg: configmod.Config | None = None, hermes: Hermes | None = None, 
     @app.get("/api/themes")
     async def themes_get(request: Request):
         """The color themes on offer and the one this person has picked."""
-        who = current(request)
-        denied = deny(who, "use")
-        if denied:
-            return denied
+        who, refused = guard(request, "use")
+        if refused:
+            return refused
         return {"themes": themesmod.THEMES, "current": theme_of(who), "default": themesmod.DEFAULT}
 
     @app.put("/api/theme")
     async def theme_put(request: Request):
         """Save this person's own theme (everyone may choose theirs; it changes nothing for anyone else)."""
-        who = current(request)
-        denied = deny(who, "use")
-        if denied:
-            return denied
-        if not same_origin(request):
-            return PlainTextResponse("Bad origin.", status_code=403)
+        who, refused = guard(request, "use", write=True, plain_origin=True)
+        if refused:
+            return refused
         try:
             theme = themesmod.clean((await request.json()).get("theme"))
         except Exception:
@@ -311,25 +313,25 @@ def make_app(cfg: configmod.Config | None = None, hermes: Hermes | None = None, 
     @app.get("/api/health")
     async def health(request: Request):
         """Yes/no answers about the connections to Hermes. Owners only. Never returns a secret."""
-        who = current(request)
-        return deny(who, "admin") or await hermes.health()
+        _, refused = guard(request, "admin")
+        return refused or await hermes.health()
 
     @app.get("/api/overview")
     async def overview_route(request: Request):
         """Everything the Home page shows. Infrastructure parts are included only for roles that may see them."""
-        who = current(request)
-        return deny(who, "use") or await overview.home(infra=cfg.allows(who["role"], "admin"), personal=cfg.allows(who["role"], "admin"))
+        who, refused = guard(request, "use")
+        return refused or await overview.home(infra=cfg.allows(who["role"], "admin"), personal=cfg.allows(who["role"], "admin"))
 
     @app.get("/api/tool-activity")
     async def tool_activity_route(request: Request):
         """The agent's latest tool call (kind, name, time), for the glowing tool icons. Owners only; never any arguments."""
-        who = current(request)
-        return deny(who, "admin") or await overview.tool_activity()
+        _, refused = guard(request, "admin")
+        return refused or await overview.tool_activity()
 
     @app.get("/api/systems")
     async def systems_route(request: Request):
-        who = current(request)
-        return deny(who, "admin") or await overview.systems_page()
+        _, refused = guard(request, "admin")
+        return refused or await overview.systems_page()
 
     # ---- asking the agent: start a run, watch it, stop it, answer an approval (one at a time per person) -------------
     RUN_ID = RUN_ID_RE
@@ -355,12 +357,9 @@ def make_app(cfg: configmod.Config | None = None, hermes: Hermes | None = None, 
 
     @app.post("/api/ask")
     async def ask(request: Request):
-        who = current(request)
-        refused = deny(who, "use")
+        who, refused = guard(request, "use", write=True)
         if refused:
             return refused
-        if not same_origin(request):
-            return JSONResponse({"detail": "Bad origin."}, status_code=403)
         try:
             message = str((await request.json()).get("message", "")).strip()
         except ValueError:
@@ -390,8 +389,7 @@ def make_app(cfg: configmod.Config | None = None, hermes: Hermes | None = None, 
 
     @app.get("/api/runs/{run_id}")
     async def run_get(run_id: str, request: Request):
-        who = current(request)
-        refused = deny(who, "use") or own_run(who, run_id)
+        _, refused = guard(request, "use", also=lambda who: own_run(who, run_id))
         if refused:
             return refused
         status, run = await hermes.api_call("GET", "/v1/runs/" + run_id)
@@ -399,23 +397,17 @@ def make_app(cfg: configmod.Config | None = None, hermes: Hermes | None = None, 
 
     @app.post("/api/runs/{run_id}/stop")
     async def run_stop(run_id: str, request: Request):
-        who = current(request)
-        refused = deny(who, "use") or own_run(who, run_id)
+        _, refused = guard(request, "use", write=True, also=lambda who: own_run(who, run_id))
         if refused:
             return refused
-        if not same_origin(request):
-            return JSONResponse({"detail": "Bad origin."}, status_code=403)
         status, res = await hermes.api_call("POST", "/v1/runs/" + run_id + "/stop", {})
         return {"ok": status == 200, "status": (res or {}).get("status")}
 
     @app.post("/api/runs/{run_id}/approval")
     async def run_approval(run_id: str, request: Request):
-        who = current(request)
-        refused = deny(who, "use") or own_run(who, run_id)
+        _, refused = guard(request, "use", write=True, also=lambda who: own_run(who, run_id))
         if refused:
             return refused
-        if not same_origin(request):
-            return JSONResponse({"detail": "Bad origin."}, status_code=403)
         try:
             body = await request.json()
         except ValueError:
@@ -432,8 +424,8 @@ def make_app(cfg: configmod.Config | None = None, hermes: Hermes | None = None, 
     @app.get("/api/gate-check")
     async def gate_check(request: Request):
         """For the approval service: 200 only if the session cookie it replays belongs to someone who may approve (owners)."""
-        who = current(request)
-        return deny(who, "admin") or {"ok": True, "user": who["user"]}
+        who, refused = guard(request, "admin")
+        return refused or {"ok": True, "user": who["user"]}
 
     @app.get("/shell-config.js")
     async def shell_config(request: Request):
