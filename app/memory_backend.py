@@ -44,25 +44,49 @@ def _vault() -> Path:
     return Path(os.environ.get("HERMES_HOME") or "/opt/data") / "obsidian-vault"
 
 
+# One parsed entry per note file, valid while the file's (modification time, size) stay the same. Every request still walks
+# the vault and stats each file, so an edit shows up at once; only unchanged notes are not read and parsed again.
+# The dict is replaced as a whole at the end of a scan, so scans running in parallel threads never see a half-built one.
+_note_cache: dict[str, tuple[tuple[int, int], dict]] = {}
+
+
 def _scan() -> list[dict]:
+    global _note_cache
     root = _vault()
     notes: list[dict] = []
     if not root.is_dir():
+        _note_cache = {}
         return notes
+    previous, seen = _note_cache, {}
+    try:
+        return _scan_into(root, notes, previous, seen)
+    finally:
+        _note_cache = seen
+
+
+def _scan_into(root: Path, notes: list[dict], previous: dict, seen: dict) -> list[dict]:
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS and not d.startswith(".")]
         for fn in filenames:
             if not fn.lower().endswith(".md"):
                 continue
             p = Path(dirpath) / fn
+            rel = p.relative_to(root).as_posix()
             try:
                 st = p.stat()
                 if st.st_size > MAX_NOTE_BYTES:
                     continue
+                stamp = (st.st_mtime_ns, st.st_size)
+                hit = previous.get(str(root) + "/" + rel)
+                if hit and hit[0] == stamp:
+                    seen[str(root) + "/" + rel] = hit
+                    notes.append(hit[1])
+                    if len(notes) >= MAX_NOTES:
+                        return notes
+                    continue
                 text = p.read_text(encoding="utf-8", errors="ignore")
             except OSError:
                 continue
-            rel = p.relative_to(root).as_posix()
             first = ""
             title = Path(fn).stem
             for line in text.splitlines():
@@ -75,8 +99,10 @@ def _scan() -> list[dict]:
                 if not s.startswith("#"):
                     first = re.sub(r"[*_`>\[\]]+", "", s)[:140]
                     break
-            notes.append({"id": rel, "title": title[:100], "folder": rel.split("/")[0] if "/" in rel else "(top)", "size": st.st_size,
-                          "mtime": int(st.st_mtime), "summary": first, "text": text})
+            note = {"id": rel, "title": title[:100], "folder": rel.split("/")[0] if "/" in rel else "(top)", "size": st.st_size,
+                    "mtime": int(st.st_mtime), "summary": first, "text": text}
+            seen[str(root) + "/" + rel] = (stamp, note)
+            notes.append(note)
             if len(notes) >= MAX_NOTES:
                 return notes
     return notes

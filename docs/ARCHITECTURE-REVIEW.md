@@ -35,6 +35,7 @@ the same checks. State lives in small JSON files under the data dir, written wit
 | 4 | Three HTTP stacks (urllib, httpx, http.client) and several hand-rolled clients (`hermes.py`, chat, mission, room, hostctl, live). | Inconsistent timeouts, error mapping, no connection reuse. | Open |
 | 5 | `chat_backend.py` was 1,400 lines mixing chat, uploads/extraction, push (VAPID crypto), notification prefs, voice, icon drawing, actions. | Hard to review or test. | Partly fixed: document reading (`docreader.py`) and PNG drawing (`pngicons.py`) moved out (now 1,100 lines). The push, voice and routes part still shares one router and module settings that `chatmount` and tests set, so splitting it needs those moved first. |
 | 6 | ~12 hand-written atomic-write blocks, ~40 synchronous `read_text`/`json.load` calls inside async handlers. | Small event-loop stalls under load; inconsistent crash safety. | Atomic writes **fixed** (one helper, secrets get 0o600 from creation); blocking reads open |
+| 6b | Memory page: `/graph`, `/note` (to find backlinks) and `/search` each read and parsed **every note in the vault** on every request. | Cost grows with the vault; the note page paid for a full scan. | **Fixed** (per-note cache by modification stamp; 1,500 notes: repeat scan 0.12 s, edits still seen at once) |
 | 7 | `main.py` repeated `deny(...)` + `same_origin(...)` in every route. | Easy to forget one check on a new route. | **Fixed in `main.py`** (`guard()`); the feature backends still have their own |
 | 8 | Module-level mutable state (`last_run`, `owner_of`, `_state`) lives in process memory. | Breaks with more than one worker; lost on restart (acceptable today, a limit for scaling). | Open, documented |
 | 9 | Front end: single 4.2k-line `engine.js`, no build step or bundling. | Slow first load of that page, hard to maintain. | Not reviewed in depth |
@@ -43,7 +44,7 @@ the same checks. State lives in small JSON files under the data dir, written wit
 
 1. **Dependency/guard helpers in `main.py`**: one `require(who, permission, *, write=False)` that does auth, role and origin
    in one place, so a new route cannot skip a check. Pure refactor; the existing `test_audit_fixes` covers it.
-2. **One upstream client**: make `hermes.py` the only Hermes client (async httpx with a shared pooled `AsyncClient`), and have
+2. **One upstream client** (lower value than it looked: only `hermes.py` and `agentkit.call_sync` talk to Hermes; room, hostctl and live call other services): make `hermes.py` the only Hermes client (async httpx with a shared pooled `AsyncClient`), and have
    `agentkit.call` delegate to it. Removes the thread hop and gives connection reuse.
 3. **Split `chat_backend.py`** into `chat_runs`, `chat_uploads`, `chat_push`, `chat_voice`, each its own router, mounted by
    `chatmount.py`. No route paths change.
