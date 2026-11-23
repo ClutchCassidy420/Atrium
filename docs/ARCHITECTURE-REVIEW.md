@@ -29,7 +29,7 @@ the same checks. State lives in small JSON files under the data dir, written wit
 
 | # | Problem | Impact | Status |
 |---|---------|--------|--------|
-| 1 | **Every authenticated request re-parsed the sessions file** under a file lock, on the event loop (`Sessions.get` via `current()`). | Latency grows with session count; all requests stall behind it. | **Fixed** (stat-stamp cache) |
+| 1 | **Every authenticated request re-parsed the sessions file** under a file lock, on the event loop (`Sessions.get` via `current()`). | Latency grows with session count; all requests stall behind it. | **Fixed** (stat-stamp cache in `Sessions` and `UserStore`; about 2.6x faster per lookup with 200 live sessions, measured) |
 | 2 | A 65-line block (agent-name templating, `AgentRoute`) was **copied byte for byte into 6 backends**; `.env` reading, API base/key and the Hermes call were copied into 2-3 more. | A fix must be made 6 times; they were already drifting (room's `_dotenv` differed). | **Fixed** (`agentkit.py`) |
 | 3 | Run-id regex and `public_run` re-implemented in `main.py`, `chat_backend`, `mission_backend`. | Validation drift = security drift. | Regex unified; `public_run` shapes still differ (see 5) |
 | 4 | Three HTTP stacks (urllib, httpx, http.client) and several hand-rolled clients (`hermes.py`, chat, mission, room, hostctl, live). | Inconsistent timeouts, error mapping, no connection reuse. | Open |

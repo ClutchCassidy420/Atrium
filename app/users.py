@@ -1,7 +1,8 @@
 """The user list: who may sign in and in what role. A small JSON file in the app's data folder (mode 600).
 
-Passwords are stored only as scrypt hashes (see auth.py). The list is read fresh on every request, so removing a user
-or changing a role takes effect at once, even for people who are already signed in.
+Passwords are stored only as scrypt hashes (see auth.py). Reads notice a changed file at once (its modification stamp is
+checked on every request, and the file is parsed again only when the stamp changed), so removing a user or changing a
+role takes effect at once, even for people who are already signed in. Writes always start from the file itself.
 """
 from __future__ import annotations
 
@@ -26,13 +27,32 @@ class UserStore:
     def __init__(self, path: Path):
         self.path = Path(path)
         self.lock = threading.Lock()
+        self._cache: tuple[tuple | None, dict] | None = None      # (file stamp, parsed users), used by reads only
+
+    def _stamp(self) -> tuple | None:
+        try:
+            st = self.path.stat()
+        except OSError:
+            return None
+        return (st.st_mtime_ns, st.st_size, st.st_ino)
 
     def _load(self) -> dict:
+        """The users as they are on disk right now (a fresh copy: callers that write may change it)."""
         try:
             data = json.loads(self.path.read_text(encoding="utf-8"))
             return data if isinstance(data, dict) else {}
         except (OSError, ValueError):
             return {}
+
+    def _read(self) -> dict:
+        """For reads on every request: the parsed file, parsed again only when the file changed. Never modify the result."""
+        stamp = self._stamp()
+        cached = self._cache
+        if stamp is not None and cached is not None and cached[0] == stamp:
+            return cached[1]
+        data = self._load()
+        self._cache = (stamp, data) if stamp is not None else None
+        return data
 
     def _save(self, users: dict) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -40,14 +60,14 @@ class UserStore:
 
     # -- reads ------------------------------------------------------------------------------------------------
     def get(self, username: str) -> dict | None:
-        u = self._load().get((username or "").lower())
+        u = self._read().get((username or "").lower())
         return dict(u, username=(username or "").lower()) if u else None
 
     def all(self) -> list[dict]:
-        return [dict(v, username=k) for k, v in sorted(self._load().items())]
+        return [dict(v, username=k) for k, v in sorted(self._read().items())]
 
     def empty(self) -> bool:
-        return not self._load()
+        return not self._read()
 
     # -- writes -----------------------------------------------------------------------------------------------
     def add(self, username: str, role: str, password: str | None = None, password_hash: str | None = None, name: str = "") -> None:
