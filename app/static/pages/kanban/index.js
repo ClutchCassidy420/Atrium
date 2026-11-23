@@ -69,7 +69,7 @@
     var cf_ = useState(""), confirm = cf_[0], setConfirm = cf_[1];      // "start" | "resume" | "unblock" | "done" | "review" | "delete" | "reclaim"
     var sm_ = useState(""), summary = sm_[0], setSummary = sm_[1];     // the hand-off note for done / review
     function load() { return fetchJSON(API + "/tasks/" + id).then(function (r) { setData(r); setErr(""); }, function (e) { setErr(errText(e)); }); }
-    useEffect(function () { setData(null); setEdit(null); setLog(null); setConfirm(""); setSummary(""); setComment(""); load(); var t = setInterval(load, 15000); return function () { clearInterval(t); }; }, [id]);
+    useEffect(function () { setData(null); setEdit(null); setLog(null); setConfirm(""); setSummary(""); setComment(""); load(); return window.atriumEvery(load, 15000); }, [id]);
     var t = data && data.task;
     function act(fn, done) { setBusy(true); setErr(""); fn().then(function (r) { setBusy(false); setConfirm(""); if (done) done(r); p.onChanged(); load(); }, function (e) { setBusy(false); setConfirm(""); setErr(errText(e)); }); }
     function move(to) { if (to && t && to !== t.status) act(function () { return send("PATCH", API + "/tasks/" + id, { status: to }); }); }
@@ -163,7 +163,7 @@
     useEffect(function () { fetchJSON("/api/code/projects").then(function (r) { if (r && r.projects) setProjects(r.projects.map(function (x) { return x.name; })); }, function () { /* the coding workspace is optional */ }); }, []);
     useEffect(function () { alive.current = true; load(); return function () { alive.current = false; }; }, []);
     var anyRunning = board && board.columns.some(function (c) { return c.tasks.some(function (t) { return t.running; }); });
-    useEffect(function () { var t = setInterval(load, anyRunning ? 7000 : 25000); return function () { clearInterval(t); }; }, [anyRunning]);
+    useEffect(function () { return window.atriumEvery(load, anyRunning ? 7000 : 25000); }, [anyRunning]);
     useEffect(function () { function esc(e) { if (e.key === "Escape") setOpen(""); } window.addEventListener("keydown", esc); return function () { window.removeEventListener("keydown", esc); }; }, []);
     function add(ev) {
       ev.preventDefault();

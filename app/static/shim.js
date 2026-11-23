@@ -31,6 +31,20 @@
       });
     });
   }
+  /* ---- background-friendly polling ------------------------------------------------------------------------- */
+  // atriumEvery(fn, ms) runs fn every ms like setInterval, but not while the tab is hidden: a page left open in the
+  // background stops asking the server (and Hermes) for data nobody is looking at. When the tab comes back, fn runs once
+  // straight away if a tick was skipped, so the page is fresh again. Returns a function that stops it. Use it for pure
+  // data refreshes only: anything that must keep working in the background (speech, recording, run watching) keeps setInterval.
+  function atriumEvery(fn, ms) {
+    var missed = false;
+    var timer = setInterval(function () { if (document.hidden) { missed = true; } else { missed = false; fn(); } }, ms);
+    function onShow() { if (!document.hidden && missed) { missed = false; fn(); } }
+    document.addEventListener("visibilitychange", onShow);
+    return function stop() { clearInterval(timer); document.removeEventListener("visibilitychange", onShow); };
+  }
+  window.atriumEvery = atriumEvery;
+
   function buildWsAuthParam() { return Promise.resolve(["", ""]); }   // the cookie authenticates sockets too
   function buildWsUrl(path, params) {
     var q = new URLSearchParams(params || {}).toString();

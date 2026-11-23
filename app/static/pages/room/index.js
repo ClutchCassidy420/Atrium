@@ -135,8 +135,7 @@
     var running = !!(room && room.running);
     useEffect(function () {
       if (!cur) return undefined;
-      var iv = setInterval(function () { loadRoom(cur); }, running ? 1500 : 8000);
-      return function () { clearInterval(iv); };
+      return window.atriumEvery(function () { loadRoom(cur); }, running ? 1500 : 8000);
     }, [cur, running]);
 
     useEffect(function () { if (endRef.current) endRef.current.scrollIntoView({ block: "end" }); }, [room && room.messages.length, running]);

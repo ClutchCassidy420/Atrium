@@ -88,7 +88,7 @@
     var proj = scope === "all" ? "all" : (props.project || "idea-pipeline");
     var projRef = useRef(proj); projRef.current = proj;
     function load() { return fetchJSON(API + "/ideas?project=" + encodeURIComponent(projRef.current)).then(function (r) { if (alive.current) { setData(r); setErr(""); setStamp(function (n) { return n + 1; }); } }, function (e) { if (alive.current) setErr(errText(e)); }); }
-    useEffect(function () { alive.current = true; var t = setInterval(load, 15000); return function () { alive.current = false; clearInterval(t); }; }, []);
+    useEffect(function () { alive.current = true; var stop = window.atriumEvery(load, 15000); return function () { alive.current = false; stop(); }; }, []);
     useEffect(function () { setOpen(""); setAdding(false); setData(null); load(); }, [proj]);                    // another project: its own board
     function add(ev) {
       ev.preventDefault();

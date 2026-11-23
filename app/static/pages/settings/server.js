@@ -102,8 +102,7 @@
     }, [msg]);
     var live = !!((data && ((data.update && data.update.running) || data.scheduled)) || (cdata && (cdata.op || cdata.checking)) || went);
     useEffect(function () {
-      var id = setInterval(function () { load(); setTick(function (n) { return n + 1; }); }, live ? 2500 : 20000);
-      return function () { clearInterval(id); };
+      return window.atriumEvery(function () { load(); setTick(function (n) { return n + 1; }); }, live ? 2500 : 20000);
     }, [live]);
     useEffect(function () {      // a half second beat for the countdown text
       if (!(data && data.scheduled)) return undefined;

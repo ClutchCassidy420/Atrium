@@ -154,7 +154,7 @@
         if (!r.up) setState("The browser is not running.");
       }, function (e) { setState(errText(e)); });
     }
-    useEffect(function () { refresh(); var iv = setInterval(refresh, 2500); return function () { clearInterval(iv); }; }, [follow]);
+    useEffect(function () { refresh(); return window.atriumEvery(refresh, 2500); }, [follow]);
 
     useEffect(function () {
       if (!target) return undefined;

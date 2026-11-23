@@ -1,8 +1,8 @@
 # Architecture review (2026-11-22)
 
 Scope: the standalone layout on `work/port-10` (`app/`, `host/`, `code-sidecar/`, `tests/`). I read `main.py`, `auth.py`,
-`hermes.py`, the shared parts of every `*_backend.py`, and searched the rest by pattern. I did **not** read the large front-end
-files (`pages/live/engine.js` 4.2k lines, `pages/chat/index.js`, `pages/avatar/orb.js`) line by line.
+`hermes.py`, the shared parts of every `*_backend.py`, and searched the rest by pattern. I only skimmed the front end (timers, polling, listeners, structure); `pages/chat/index.js` (1.7k lines) and `pages/avatar/orb.js`
+(1.5k lines) were not read line by line. `pages/live/engine.js` is a third-party bundle and was not reviewed.
 
 ## 1. Architecture
 
@@ -38,7 +38,7 @@ the same checks. State lives in small JSON files under the data dir, written wit
 | 6b | Memory page: `/graph`, `/note` (to find backlinks) and `/search` each read and parsed **every note in the vault** on every request. | Cost grows with the vault; the note page paid for a full scan. | **Fixed** (per-note cache by modification stamp; 1,500 notes: repeat scan 0.12 s, edits still seen at once) |
 | 7 | `main.py` repeated `deny(...)` + `same_origin(...)` in every route. | Easy to forget one check on a new route. | **Fixed in `main.py`** (`guard()`); the feature backends still have their own |
 | 8 | Module-level mutable state (`last_run`, `owner_of`, `_state`) lives in process memory. | Breaks with more than one worker; lost on restart (acceptable today, a limit for scaling). | Open, documented |
-| 9 | Front end: single 4.2k-line `engine.js`, no build step or bundling. | Slow first load of that page, hard to maintain. | Not reviewed in depth |
+| 9 | Front end: background tabs kept polling the server (about 10 pages refresh every 2.5 to 30 seconds whether or not anyone is looking). `pages/live/engine.js` is **not hand-written**: it is a prebuilt, minified bundle of Three.js and TalkingHead (MIT, listed in `THIRD_PARTY_NOTICES.md`), so its size is a delivery question, not a maintainability one: 1.1 MB, sent by the app as is and uncompressed (only the admin-only Live page loads it). | Wasted requests while idle; slow first load of the Live page when no proxy compresses. | Polling **fixed** for the pure data refreshes (`atriumEvery` in `shim.js`: pauses while the tab is hidden, refreshes once on return; chat, live speech and recording keep working in the background). Compression open: do it in the reverse proxy, not in the app, because a compressing layer in the app can hold back the chat's streamed (SSE) replies. |
 
 ## 3. Refactoring strategy (next steps, in order of value and safety)
 
