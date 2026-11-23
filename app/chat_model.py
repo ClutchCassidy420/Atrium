@@ -64,14 +64,15 @@ def save(user: str, value: dict) -> None:
         raise ValueError("Not a valid model selection.")
     file = path(user)
     file.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(mode="w", dir=file.parent, delete=False, encoding="utf-8") as tmp:
-        try:
+    tmp = tempfile.NamedTemporaryFile(mode="w", dir=file.parent, delete=False, encoding="utf-8")
+    try:
+        with tmp:                                   # closed before the rename: Windows cannot rename a file that is still open
             json.dump(value, tmp)
             tmp.flush()
             os.fsync(tmp.fileno())
-            os.replace(tmp.name, file)
-        finally:
-            Path(tmp.name).unlink(missing_ok=True)
+        os.replace(tmp.name, file)
+    finally:
+        Path(tmp.name).unlink(missing_ok=True)
 
 
 def override(user: Optional[str], legacy: Optional[dict] = None) -> dict:
