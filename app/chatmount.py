@@ -90,8 +90,9 @@ def mount_chat(app, cfg, hermes, current, same_origin) -> ChatOwners:
     if cfg.action_gate_url:
         os.environ["ACTION_GATE_URL"] = cfg.action_gate_url
     import chat_backend as backend
-    backend.PUSH_ENABLED = cfg.push_enabled
-    backend.PUSH_PROXY = cfg.push_proxy or None
+    import chat_push
+    chat_push.PUSH_ENABLED = cfg.push_enabled
+    chat_push.PUSH_PROXY = cfg.push_proxy or None
     if cfg.tts_url:
         backend.KOKORO_URL = cfg.tts_url
     if cfg.action_gate_url:

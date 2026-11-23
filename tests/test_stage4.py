@@ -186,7 +186,7 @@ def test_the_install_check_page_is_there_for_signed_in_people(full):
 
 def test_push_goes_out_through_the_configured_proxy_and_only_there(full, monkeypatch):
     """The sender must use the proxy (the app has no direct internet) and must not pick up proxy settings from the environment."""
-    import chat_backend as b
+    import chat_push as b
     seen = {}
 
     class FakeClient:
@@ -204,8 +204,8 @@ def test_push_goes_out_through_the_configured_proxy_and_only_there(full, monkeyp
     monkeypatch.setattr(b, "PUSH_PROXY", "http://egress-proxy:3128")
     full.as_("alice", PW, "10.6.0.11")
     full.post(P + "/push/subscribe", json={"subscription": SUB, "label": "phone"}, headers=H)
-    monkeypatch.setattr(b, "_send_one", lambda client, sub, data, payload, urgency: 201)
-    res = b._deliver("t", "x", "test", "normal", True, "/chat")
+    monkeypatch.setattr(b, "send_one", lambda client, sub, data, payload, urgency: 201)
+    res = b.deliver("t", "x", "test", "normal", True, "/chat")
     assert res["sent"] == 1
     assert seen.get("proxy") == "http://egress-proxy:3128" and seen.get("trust_env") is False
 
