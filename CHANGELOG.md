@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- **Calendar times on the Alpine image, and faster sign-in.** `tzdata` is now pinned: the image has no time zone database of its own, so events with a `TZID` were silently shown without their zone. Sign-in and role lookups and the Memory page no longer re-read their files on every request (they re-read only when the file changed), background tabs stop refreshing, and the repeated backend plumbing now lives in `app/agentkit.py`. See `docs/ARCHITECTURE-REVIEW.md`.
+- **Faster sign-in, Memory and background tabs; time zone data pinned.** `tzdata` is now pinned so calendar events with a `TZID` get their zone on any machine, including ones without a system time zone database (Windows development machines, minimal images). The deploy image already had one. Sign-in and role lookups and the Memory page no longer re-read their files on every request (they re-read only when the file changed), background tabs stop refreshing, and the repeated backend plumbing now lives in `app/agentkit.py`. See `docs/ARCHITECTURE-REVIEW.md`.
 - **Email, Files and Calendar** (optional, owner only). Pages and routes appear only when `MAIL_*` or `NEXTCLOUD_*` settings exist (new page field `requires`).
   Mail connections are always verified (IMAP and SMTP implicit TLS); move and delete act on one message by UID; large messages are never truncated;
   sends are idempotent (`submission_id`) and report success once the server accepted the message even if saving to Sent fails. Uploads never replace

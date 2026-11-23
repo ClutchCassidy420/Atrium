@@ -1,10 +1,11 @@
 # Example deployment of the app. Copy to your server as compose.yaml and fill in the values for your install.
+# Keep compose.yaml in the repository root: the build context is the whole repository and the Dockerfile is deploy/Dockerfile.
 # Secrets and addresses go in config.private.env (never committed); names, brand and pages go in the instance folder.
 services:
   webapp:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: deploy/Dockerfile
     image: atrium:1
     container_name: atrium
     user: "10001:2000"                  # the app user, with the agent's group as the main group (2000 here: use your agent's gid)
