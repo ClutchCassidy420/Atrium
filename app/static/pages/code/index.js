@@ -94,7 +94,7 @@
     function save() { fetchJSON(CODE + "/file", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ project: p.project, path: p.path, text: text }) }).then(function () { setMsg("Saved."); p.onSaved(); }, function (e) { setMsg(errText(e)); }); }
     return h("div", { className: "cd-fileview" },
       h("div", { className: "cd-fileview-head" }, h("strong", null, p.path), data && data.text !== null ? h("button", { type: "button", className: "cd-btn", disabled: text === data.text, onClick: save }, "Save") : null, msg ? h("span", { className: "cd-muted" }, msg) : null),
-      !data ? h("p", { className: "cd-muted" }, msg || "Loading…") : data.text === null ? h("p", { className: "cd-muted" }, data.note) :
+      !data ? (msg ? h("p", { className: "cd-muted" }, msg) : h(window.__APP_UI__.kit.Loading, { label: "Loading…" })) : data.text === null ? h("p", { className: "cd-muted" }, data.note) :
         h("textarea", { className: "cd-editor", spellCheck: false, value: text, "aria-label": "File contents", onChange: function (e) { setText(e.target.value); } }));
   }
 
@@ -425,7 +425,7 @@
     }
     function pickMode(m) { setMode(m); setPref("mode", m); }
 
-    if (!setup) return h("div", { className: "cd-page" }, h("p", { className: "cd-muted" }, "Loading…"));
+    if (!setup) return h("div", { className: "cd-page" }, h(window.__APP_UI__.kit.Loading, { label: "Loading…" }));
     if (!setup.configured) return h("div", { className: "cd-page" }, h("h1", null, "Agentic coding"), h("div", { className: "cd-note" }, "The coding workspace is not set up on this install yet. It needs the workspace service (see ", h("code", null, "code-sidecar/"), ") and the CODE_URL and CODE_TOKEN settings."));
     if (!setup.up) return h("div", { className: "cd-page" }, h("h1", null, "Agentic coding"), h("div", { className: "cd-note" }, "The coding workspace service is not answering. Check that its container is running."));
 

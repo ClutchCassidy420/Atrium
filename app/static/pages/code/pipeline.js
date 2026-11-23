@@ -45,7 +45,7 @@
     var names = ["idea", "research", "plan", "review"];
     return h("div", { className: "pl-notes" },
       h("div", { className: "pl-tabs", role: "tablist" }, names.map(function (n) { return h("button", { key: n, type: "button", role: "tab", "aria-selected": file === n ? "true" : "false", className: "pl-tab" + (file === n ? " pl-on" : ""), onClick: function () { setFile(n); } }, LABEL[n]); })),
-      text === null ? h("p", { className: "pl-muted" }, "Loading…") : text === false || !text ? h("p", { className: "pl-muted" }, "Not written yet.") : h("pre", { className: "pl-text" }, text));
+      text === null ? h(window.__APP_UI__.kit.Loading, { label: "Loading…" }) : text === false || !text ? h("p", { className: "pl-muted" }, "Not written yet.") : h("pre", { className: "pl-text" }, text));
   }
 
   function Panel(p) {
@@ -101,7 +101,7 @@
               h("option", { value: "__all__" }, "All projects"),
               (function () { var names = (props.projects || []).slice(); if (names.indexOf("idea-pipeline") < 0) names.unshift("idea-pipeline"); return names.map(function (n) { return h("option", { key: n, value: n }, n === "idea-pipeline" ? "idea-pipeline (the incubator)" : n); }); })()));
     if (!data) return h("div", { className: "pl-page" }, h("header", { className: "pl-head" }, h("div", null, h("h1", { className: "pl-h1" }, "Idea pipeline"), projSel)),
-      err ? h("div", { className: "cd-err", role: "alert" }, err) : h("p", { className: "pl-muted" }, "Loading the pipeline…"));
+      err ? h(window.__APP_UI__.kit.Alert, { tone: "danger" }, err) : h(window.__APP_UI__.kit.Loading, { label: "Loading the pipeline…" }));
     var cols = ["idea", "research", "plan", "build", "review", "done"], sel = data.ideas.filter(function (x) { return x.id === open; })[0];
     return h("div", { className: "pl-page" },
       h("header", { className: "pl-head" },

@@ -151,7 +151,7 @@
       h("div", { className: "ats-h" }, "When things run"),
       h("div", { className: "ats-note" }, "Times are your local time. To pause a job or run it now, use the Workflows tab."),
       err ? h("div", { className: "ats-err" }, err) : null,
-      !data ? h("div", { className: "ats-note" }, "Loading…") : data.jobs.map(function (j) { return h(JobRow, { key: j.id, job: j, days: data.days, intervals: data.intervals, onSaved: load }); }));
+      !data ? h(window.__APP_UI__.kit.Loading, { label: "Loading…" }) : data.jobs.map(function (j) { return h(JobRow, { key: j.id, job: j, days: data.days, intervals: data.intervals, onSaved: load }); }));
   }
 
   /* ---------- devices ---------- */
@@ -167,7 +167,7 @@
     return h("div", { className: "ats-card" },
       h("div", { className: "ats-h" }, "Your devices"),
       h("div", { className: "ats-note" }, "Devices that receive pings. Add one from the bell in Chat."),
-      !list ? h("div", { className: "ats-note" }, "Loading…") : !list.length ? h("div", { className: "ats-note" }, "None yet.") : list.map(function (d) {
+      !list ? h(window.__APP_UI__.kit.Loading, { label: "Loading…" }) : !list.length ? h("div", { className: "ats-note" }, "None yet.") : list.map(function (d) {
         return h("div", { key: d.id, className: "ats-row" },
           h("div", { className: "ats-row-text" }, h("div", { className: "ats-row-t" }, d.label), h("div", { className: "ats-note" }, (d.service || "") + (d.added ? " · added " + new Date(d.added * 1000).toLocaleDateString() : ""))),
           h("button", { type: "button", className: "ats-btn", onClick: function () { remove(d); } }, "Remove"));
@@ -217,7 +217,7 @@
     return h("div", { className: "ats-card" },
       h("div", { className: "ats-h" }, "Your agent's name"),
       h("div", { className: "ats-note" }, "What you call your agent. It appears on every page, in notifications and in the Room. Letters, numbers, spaces, dots, apostrophes and hyphens; up to 40 characters."),
-      !data ? h("div", { className: "ats-note" }, "Loading…") : h("div", { className: "ats-inline" },
+      !data ? h(window.__APP_UI__.kit.Loading, { label: "Loading…" }) : h("div", { className: "ats-inline" },
         h("input", { type: "text", className: "ats-input", value: val, maxLength: 40, onChange: function (e) { setVal(e.target.value); } }),
         h("button", { type: "button", className: "ats-btn", disabled: !val.trim() || val.trim() === data.name, onClick: save }, "Save")),
       msg ? h("div", { className: "ats-msg" }, msg) : null);
@@ -244,7 +244,7 @@
     return h("div", { className: "ats-card" },
       h("div", { className: "ats-h" }, "Her voice"),
       h("div", { className: "ats-note" }, "Used when {{agent}} reads her replies aloud in Chat. The voice runs on your own server."),
-      !data ? h("div", { className: "ats-note" }, "Loading…") : h("div", { className: "ats-inline" },
+      !data ? h(window.__APP_UI__.kit.Loading, { label: "Loading…" }) : h("div", { className: "ats-inline" },
         h("select", { className: "ats-input", value: data.voice, onChange: function (e) { choose(e.target.value); } }, data.choices.map(function (c) { return h("option", { key: c.id, value: c.id }, c.label); })),
         h("button", { type: "button", className: "ats-btn", disabled: busy, onClick: preview }, busy ? "Playing…" : "▶ Preview")),
       msg ? h("div", { className: "ats-msg" }, msg) : null);
@@ -393,7 +393,7 @@
           setResult(null);
           refresh().finally(function () { setBusy(false); });
         } }, "Refresh"),
-        !installed ? h("p", { className: "ats-note" }, "Loading…") :
+        !installed ? h(window.__APP_UI__.kit.Loading, { label: "Loading…" }) :
           installed.error ? h("p", { role: "alert", className: "ats-note" }, installed.error) :
             !installed.rows.length ? h("p", { className: "ats-note" }, "No installed connections.") :
               installed.rows.map(function (server) {
@@ -420,7 +420,7 @@
               })),
       h("div", { className: "ats-card" },
         h("h3", { className: "ats-h" }, "Hermes MCP catalog"),
-        !catalog ? h("p", { className: "ats-note" }, "Loading…") :
+        !catalog ? h(window.__APP_UI__.kit.Loading, { label: "Loading…" }) :
           catalog.error ? h("p", { role: "alert", className: "ats-note" }, catalog.error) :
             h(SDK.React.Fragment, null,
               h("label", { className: "ats-connection-field" }, "Find a connection",

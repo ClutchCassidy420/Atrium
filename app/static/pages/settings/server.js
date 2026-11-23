@@ -110,7 +110,7 @@
       return function () { clearInterval(id); };
     }, [!!(data && data.scheduled)]);
 
-    if (!data) return h("div", { className: "ats-note" }, err || "Loading…");
+    if (!data) return err ? h(window.__APP_UI__.kit.Alert, { tone: "danger" }, err) : h(window.__APP_UI__.kit.Loading, { label: "Loading…" });
     if (!data.enabled) return h("div", { className: "ats-note" }, "Server actions are not set up on this install.");
     if (!data.reachable && !went) return h("div", { className: "ats-err" }, "The host helper is not answering, so server actions are unavailable.");
 

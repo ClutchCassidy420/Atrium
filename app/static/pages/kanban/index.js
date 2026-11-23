@@ -75,7 +75,7 @@
     function move(to) { if (to && t && to !== t.status) act(function () { return send("PATCH", API + "/tasks/" + id, { status: to }); }); }
     function startIt() { act(function () { return send("POST", API + "/tasks/" + id + "/start"); }, function (r) { if (r && r.ok === false) setErr(r.reason || "The board could not start this card."); }); }
     var closeBtn = h("button", { type: "button", className: "kb-btn", onClick: p.onClose, "aria-label": "Close" }, "Close");
-    if (!t) return h("aside", { className: "kb-panel", "aria-label": "Card" }, h("div", { className: "kb-panel-top" }, closeBtn), err ? h("div", { className: "kb-err", role: "alert" }, err) : h("p", { className: "kb-muted" }, "Loading…"));
+    if (!t) return h("aside", { className: "kb-panel", "aria-label": "Card" }, h("div", { className: "kb-panel-top" }, closeBtn), err ? h(window.__APP_UI__.kit.Alert, { tone: "danger" }, err) : h(window.__APP_UI__.kit.Loading, { label: "Loading…" }));
     var canStart = t.status === "triage";
     var resumable = t.status === "triage" && !!t.assignee && (data.runs || []).length > 0;       // paused work that was already started: pick it up, do not rewrite its spec
     var finishable = ["triage", "todo", "ready", "running", "blocked", "review"].indexOf(t.status) >= 0;
@@ -103,7 +103,7 @@
         h("div", { className: "kb-row" }, h("button", { type: "button", className: "kb-btn kb-primary", disabled: busy || !edit.title.trim(), onClick: function () { act(function () { return send("PATCH", API + "/tasks/" + id, { title: edit.title.trim(), body: edit.body }); }, function () { setEdit(null); }); } }, "Save"),
           h("button", { type: "button", className: "kb-btn", onClick: function () { setEdit(null); } }, "Cancel")))
         : h("div", null, h("h2", { className: "kb-title" }, t.title), t.body ? h(Notes, { text: t.body }) : h("p", { className: "kb-muted" }, "No notes yet.")),
-      err ? h("div", { className: "kb-err", role: "alert" }, err) : null,
+      err ? h(window.__APP_UI__.kit.Alert, { tone: "danger" }, err) : null,
       h("div", { className: "kb-row kb-wrap" },
         h("label", { className: "kb-lab" }, "Move to ", h("select", { className: "kb-select", value: t.status, disabled: busy || t.status === "running", onChange: function (e) { move(e.target.value); } },
           cols.map(function (c) { return h("option", { key: c.key, value: c.key, disabled: !c.drop && c.key !== t.status }, c.label); }))),
@@ -179,7 +179,7 @@
       if (!from || from.key === col.key) return;
       send("PATCH", API + "/tasks/" + id, { status: col.key }).then(load, function (e2) { setErr(errText(e2)); load(); });
     }
-    if (!board) return h("div", { className: "kb-page" }, err ? h("div", { className: "kb-err", role: "alert" }, "Could not load the board: " + err) : h("p", { className: "kb-muted" }, "Loading the board…"));
+    if (!board) return h("div", { className: "kb-page" }, err ? h(window.__APP_UI__.kit.Alert, { tone: "danger", title: "Could not load the board" }, err) : h(window.__APP_UI__.kit.Loading, { label: "Loading the board…" }));
     var ql = query.trim().toLowerCase();
     function shown(t) { return (!who || (who === "-" ? !t.assignee : t.assignee === who)) && (!ql || (String(t.title || "") + " " + String(t.preview || "")).toLowerCase().indexOf(ql) >= 0); }
     var total = 0, running = 0;
@@ -201,7 +201,7 @@
           h("option", { value: "" }, "A temporary folder (deleted when the card is done)"), projects.map(function (n) { return h("option", { key: n, value: n }, "Coding project: " + n + " (kept)"); }))) : null,
         h("div", { className: "kb-row" }, h("button", { type: "submit", className: "kb-btn kb-primary", disabled: busy || !nTitle.trim() }, "Add to the board"),
           h("span", { className: "kb-muted" }, "It waits in " + (board.columns[0] ? board.columns[0].label : "the first column") + ". Nobody is assigned, so nothing starts until you say so."))) : null,
-      err ? h("div", { className: "kb-err", role: "alert" }, err) : null,
+      err ? h(window.__APP_UI__.kit.Alert, { tone: "danger" }, err) : null,
       h("div", { className: "kb-layout" + (open ? " kb-with-panel" : "") },
         h("div", { className: "kb-board", role: "list" }, cols.map(function (c) {
           var list = c.tasks.filter(shown);
