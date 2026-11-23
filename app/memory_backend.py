@@ -25,74 +25,11 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException
+from agentkit import (AgentRoute as _AgentRoute)
 
 # --- the agent's name --------------------------------------------------------------------------------------------
 # Text in this file says {{agent}} wherever it means the agent's name. It is filled in on the way out (JSON, errors,
 # streams, files) from <data>/atrium/agent.json, which the Settings tab writes. Without it the name is "Assistant".
-
-_AGENT_NAME_RE = __import__("re").compile(r"^[A-Za-z0-9][A-Za-z0-9 ._'-]{0,39}$")
-_agent_cache: dict = {"t": 0.0, "v": "Assistant"}
-
-
-def _agent_name() -> str:
-    import json as _json
-    import os as _os
-    import time as _time
-    from pathlib import Path as _Path
-    if _time.time() - _agent_cache["t"] < 5:
-        return _agent_cache["v"]
-    name = "Assistant"
-    try:
-        home = _Path(_os.environ.get("HERMES_HOME") or "/opt/data")
-        value = _json.loads((home / "atrium" / "agent.json").read_text(encoding="utf-8")).get("name")
-        if isinstance(value, str) and _AGENT_NAME_RE.match(value.strip()):
-            name = value.strip()
-    except (OSError, ValueError, AttributeError):
-        pass
-    _agent_cache.update({"t": _time.time(), "v": name})
-    return name
-
-
-def _T(text):
-    return text.replace("{{agent}}", _agent_name()) if isinstance(text, str) and "{{agent}}" in text else text
-
-
-def _fill(resp):
-    body = getattr(resp, "body", None)
-    if isinstance(body, (bytes, bytearray)) and b"{{agent}}" in body:
-        resp.body = bytes(body).replace(b"{{agent}}", _agent_name().encode("utf-8"))
-        resp.headers["content-length"] = str(len(resp.body))
-    elif hasattr(resp, "body_iterator"):
-        inner = resp.body_iterator
-
-        async def _gen():
-            async for chunk in inner:
-                if isinstance(chunk, (bytes, bytearray)):
-                    yield bytes(chunk).replace(b"{{agent}}", _agent_name().encode("utf-8"))
-                elif isinstance(chunk, str):
-                    yield _T(chunk)
-                else:
-                    yield chunk
-        resp.body_iterator = _gen()
-    return resp
-
-
-from fastapi.routing import APIRoute as _APIRoute  # noqa: E402
-
-
-class _AgentRoute(_APIRoute):
-    def get_route_handler(self):
-        original = super().get_route_handler()
-
-        async def handler(request):
-            try:
-                resp = await original(request)
-            except HTTPException as exc:
-                detail = _T(exc.detail) if isinstance(exc.detail, str) else exc.detail
-                raise HTTPException(status_code=exc.status_code, detail=detail, headers=exc.headers) from None
-            return _fill(resp)
-        return handler
-
 
 router = APIRouter(route_class=_AgentRoute)
 

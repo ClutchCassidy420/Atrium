@@ -66,6 +66,14 @@ class Sessions:
         self.path = path
         self.lock = threading.Lock()
         self.items: dict[str, dict] = {}
+        self._stamp: tuple | None = None      # (mtime_ns, size, inode) of the file as last read or written by this process
+
+    def _file_stamp(self) -> tuple | None:
+        try:
+            st = self.path.stat()
+        except OSError:
+            return None
+        return (st.st_mtime_ns, st.st_size, st.st_ino)
 
     @contextmanager
     def _transaction(self):
@@ -83,14 +91,21 @@ class Sessions:
                     import fcntl
                     fcntl.flock(handle, fcntl.LOCK_EX)
                 try:
-                    try:
-                        loaded = json.loads(self.path.read_text())
-                        self.items = loaded if isinstance(loaded, dict) else {}
-                    except FileNotFoundError:
-                        self.items = {}
-                    except (ValueError, OSError):                 # unreadable or damaged: start empty, as before (people sign in again), never fail every request
-                        LOG.warning("The sessions file could not be read; starting with no sessions.")
-                        self.items = {}
+                    # Every request comes through here, so the file is parsed again only when it has changed on disk
+                    # (another process, such as the user CLI, writes it with a rename, which changes the stamp).
+                    stamp = self._file_stamp()
+                    if stamp is None or stamp != self._stamp:
+                        try:
+                            loaded = json.loads(self.path.read_text())
+                            self.items = loaded if isinstance(loaded, dict) else {}
+                            self._stamp = stamp
+                        except FileNotFoundError:
+                            self.items = {}
+                            self._stamp = None
+                        except (ValueError, OSError):                 # unreadable or damaged: start empty, as before (people sign in again), never fail every request
+                            LOG.warning("The sessions file could not be read; starting with no sessions.")
+                            self.items = {}
+                            self._stamp = None
                     yield
                 finally:
                     if os.name == "nt":
@@ -110,6 +125,7 @@ class Sessions:
         tmp.write_text(json.dumps(self.items))
         os.chmod(tmp, 0o600)
         tmp.replace(self.path)
+        self._stamp = self._file_stamp()
 
     def create(self, user: str, credential: str = "") -> str:
         sid = secrets.token_urlsafe(32)

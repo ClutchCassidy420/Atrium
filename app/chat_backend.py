@@ -62,74 +62,13 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from pydantic import BaseModel, Field
 
 import chat_model
+from agentkit import (AgentRoute as _AgentRoute, agent_name as _agent_name, fill_text as _T, api_base as _api_base,
+                      api_key as _api_key, call as _call, check_run_id as _check_run_id, hermes_home as _hermes_home,
+                      RUN_ID_RE, valid_agent_name, save_agent_name)
 
 # --- the agent's name --------------------------------------------------------------------------------------------
 # Text in this file says {{agent}} wherever it means the agent's name. It is filled in on the way out (JSON, errors,
 # streams, files) from <data>/atrium/agent.json, which the Settings tab writes. Without it the name is "Assistant".
-
-_AGENT_NAME_RE = __import__("re").compile(r"^[A-Za-z0-9][A-Za-z0-9 ._'-]{0,39}$")
-_agent_cache: dict = {"t": 0.0, "v": "Assistant"}
-
-
-def _agent_name() -> str:
-    import json as _json
-    import os as _os
-    import time as _time
-    from pathlib import Path as _Path
-    if _time.time() - _agent_cache["t"] < 5:
-        return _agent_cache["v"]
-    name = "Assistant"
-    try:
-        home = _Path(_os.environ.get("HERMES_HOME") or "/opt/data")
-        value = _json.loads((home / "atrium" / "agent.json").read_text(encoding="utf-8")).get("name")
-        if isinstance(value, str) and _AGENT_NAME_RE.match(value.strip()):
-            name = value.strip()
-    except (OSError, ValueError, AttributeError):
-        pass
-    _agent_cache.update({"t": _time.time(), "v": name})
-    return name
-
-
-def _T(text):
-    return text.replace("{{agent}}", _agent_name()) if isinstance(text, str) and "{{agent}}" in text else text
-
-
-def _fill(resp):
-    body = getattr(resp, "body", None)
-    if isinstance(body, (bytes, bytearray)) and b"{{agent}}" in body:
-        resp.body = bytes(body).replace(b"{{agent}}", _agent_name().encode("utf-8"))
-        resp.headers["content-length"] = str(len(resp.body))
-    elif hasattr(resp, "body_iterator"):
-        inner = resp.body_iterator
-
-        async def _gen():
-            async for chunk in inner:
-                if isinstance(chunk, (bytes, bytearray)):
-                    yield bytes(chunk).replace(b"{{agent}}", _agent_name().encode("utf-8"))
-                elif isinstance(chunk, str):
-                    yield _T(chunk)
-                else:
-                    yield chunk
-        resp.body_iterator = _gen()
-    return resp
-
-
-from fastapi.routing import APIRoute as _APIRoute  # noqa: E402
-
-
-class _AgentRoute(_APIRoute):
-    def get_route_handler(self):
-        original = super().get_route_handler()
-
-        async def handler(request):
-            try:
-                resp = await original(request)
-            except HTTPException as exc:
-                detail = _T(exc.detail) if isinstance(exc.detail, str) else exc.detail
-                raise HTTPException(status_code=exc.status_code, detail=detail, headers=exc.headers) from None
-            return _fill(resp)
-        return handler
-
 
 router = APIRouter(route_class=_AgentRoute)
 
@@ -141,90 +80,10 @@ MAX_IMAGE_BYTES = 6 * 1024 * 1024      # per image, after decoding (the page shr
 _IMAGE_TYPES = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/gif": ".gif"}
 _DATA_URL_RE = re.compile(r"^data:(image/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/=]+)$")
 UPSTREAM_TIMEOUT_S = 15
-_RUN_ID_RE = re.compile(r"^[A-Za-z0-9_\-]{1,100}$")
 _SESSION_RE = re.compile(r"^atrium-chat-[a-z0-9]{6,40}$")
 
 
 # --- configuration (server side only) ----------------------------------------
-
-def _hermes_home() -> Path:
-    return Path(os.environ.get("HERMES_HOME") or "/opt/data")
-
-
-def _dotenv_value(name: str) -> Optional[str]:
-    """Read one value from the Hermes .env file without exporting it anywhere."""
-    try:
-        for line in (_hermes_home() / ".env").read_text(encoding="utf-8", errors="ignore").splitlines():
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, _, value = line.partition("=")
-            if key.strip() == name:
-                return value.strip().strip('"').strip("'") or None
-    except OSError:
-        return None
-    return None
-
-
-def _api_key() -> Optional[str]:
-    return os.environ.get("API_SERVER_KEY") or _dotenv_value("API_SERVER_KEY")
-
-
-def _api_base() -> str:
-    host = os.environ.get("API_SERVER_HOST") or _dotenv_value("API_SERVER_HOST") or "127.0.0.1"
-    if host in ("0.0.0.0", "::", ""):
-        host = "127.0.0.1"
-    port = os.environ.get("API_SERVER_PORT") or _dotenv_value("API_SERVER_PORT") or "8642"
-    if not re.fullmatch(r"\d{2,5}", str(port)):
-        port = "8642"
-    return f"http://{host}:{port}"
-
-
-# --- upstream calls ----------------------------------------------------------
-
-def _call_sync(method: str, path: str, payload: Optional[dict] = None) -> tuple[int, dict]:
-    key = _api_key()
-    if not key:
-        raise HTTPException(status_code=503, detail="The agent API key is not configured.")
-    data = json.dumps(payload).encode("utf-8") if payload is not None else None
-    req = urllib.request.Request(
-        _api_base() + path,
-        data=data,
-        method=method,
-        headers={"Authorization": "Bearer " + key, "Content-Type": "application/json", "Accept": "application/json"},
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=UPSTREAM_TIMEOUT_S) as resp:
-            body = resp.read(2_000_000)
-            return resp.status, (json.loads(body) if body else {})
-    except urllib.error.HTTPError as exc:
-        detail = "The agent API refused the request."
-        try:
-            parsed = json.loads(exc.read(20_000) or b"{}")
-            err = parsed.get("error") if isinstance(parsed, dict) else None
-            if isinstance(err, dict):
-                err = err.get("message")
-            if isinstance(err, str) and err:
-                detail = err[:200]
-        except Exception:
-            pass
-        code = exc.code if exc.code in (400, 404, 409, 429) else 502
-        raise HTTPException(status_code=code, detail=detail) from None
-    except HTTPException:
-        raise
-    except Exception:
-        raise HTTPException(status_code=502, detail="Could not reach the agent API.") from None
-
-
-async def _call(method: str, path: str, payload: Optional[dict] = None) -> tuple[int, dict]:
-    return await asyncio.to_thread(_call_sync, method, path, payload)
-
-
-def _check_run_id(run_id: str) -> str:
-    if not _RUN_ID_RE.fullmatch(run_id or ""):
-        raise HTTPException(status_code=400, detail="Invalid run id.")
-    return run_id
-
 
 def _public_run(run: dict) -> dict:
     """Only the fields the page needs."""
@@ -299,7 +158,7 @@ async def send(body: SendBody, request: Request) -> dict:
     payload.update(chat_model.override(request.state.who["user"], _engine_now()))
     _, run = await _call("POST", "/v1/runs", payload)
     run_id = run.get("run_id")
-    if not isinstance(run_id, str) or not _RUN_ID_RE.fullmatch(run_id):
+    if not isinstance(run_id, str) or not RUN_ID_RE.fullmatch(run_id):
         raise HTTPException(status_code=502, detail="The agent API returned an unexpected answer.")
     if PUSH_ENABLED:
         _spawn(_watch_run(run_id, message or "(a picture)"))
@@ -1204,14 +1063,9 @@ async def agent_info() -> dict:
 @router.post("/agent")
 async def agent_set(body: AgentBody) -> dict:
     name = " ".join(body.name.split())
-    if not _AGENT_NAME_RE.match(name):
+    if not valid_agent_name(name):
         raise HTTPException(status_code=400, detail="Use letters, numbers, spaces, dots, apostrophes or hyphens (up to 40 characters).")
-    f = _hermes_home() / "atrium" / "agent.json"
-    f.parent.mkdir(parents=True, exist_ok=True)
-    tmp = f.with_suffix(".tmp")
-    tmp.write_text(json.dumps({"name": name}), encoding="utf-8")
-    os.replace(tmp, f)
-    _agent_cache["t"] = 0.0
+    save_agent_name(name)
     return {"name": name}
 
 

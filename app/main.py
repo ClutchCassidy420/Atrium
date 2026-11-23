@@ -19,6 +19,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 
 import config as configmod
+from agentkit import RUN_ID_RE, atomic_write_text
 from auth import Sessions, Throttle, hash_password, verify_password
 from hermes import Hermes
 from overview import Overview
@@ -277,10 +278,7 @@ def make_app(cfg: configmod.Config | None = None, hermes: Hermes | None = None, 
             look = None
         if look is None:
             return JSONResponse({"detail": "That look is not valid."}, status_code=422)
-        path = cfg.data_dir / "avatar-look.json"
-        tmp = path.with_name(path.name + ".tmp")
-        tmp.write_text(json.dumps(look), encoding="utf-8")
-        tmp.replace(path)
+        atomic_write_text(cfg.data_dir / "avatar-look.json", json.dumps(look))
         return {"ok": True}
 
     @app.get("/api/themes")
@@ -334,7 +332,7 @@ def make_app(cfg: configmod.Config | None = None, hermes: Hermes | None = None, 
         return deny(who, "admin") or await overview.systems_page()
 
     # ---- asking the agent: start a run, watch it, stop it, answer an approval (one at a time per person) -------------
-    RUN_ID = re.compile(r"^[A-Za-z0-9_\-]{1,100}$")
+    RUN_ID = RUN_ID_RE
     TERMINAL = {"completed", "failed", "cancelled", "interrupted"}
     last_run: dict[str, dict] = {}                     # username -> {"id": run id, "at": monotonic time}
     owner_of: dict[str, str] = {}                      # run id -> username (bounded)
