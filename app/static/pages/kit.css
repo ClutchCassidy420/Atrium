@@ -1,0 +1,64 @@
+/* Atrium UI kit styles. Tokens only (tokens.css); an install re-themes by changing token values, never this file. */
+.kit-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* Button */
+.kit-btn { display: inline-flex; align-items: center; justify-content: center; gap: .5em; font: inherit; font-weight: 600; cursor: pointer;
+  border-radius: calc(var(--radius) * .7); border: 1px solid var(--color-border); background: var(--color-muted); color: var(--color-foreground);
+  min-height: 40px; padding: 0 1em; transition: background .15s, border-color .15s, opacity .15s; }
+.kit-btn-sm { min-height: 32px; padding: 0 .75em; font-size: .875em; }
+.kit-btn:hover:not([disabled]):not([aria-disabled="true"]) { border-color: var(--color-primary); }
+.kit-btn-primary { background: var(--color-primary); border-color: var(--color-primary); color: var(--color-primary-foreground); }
+.kit-btn-ghost { background: transparent; border-color: transparent; }
+.kit-btn-danger { background: var(--color-destructive); border-color: var(--color-destructive); color: var(--color-primary-foreground); }
+.kit-btn[disabled], .kit-btn[aria-disabled="true"] { opacity: .55; cursor: not-allowed; }
+.kit-btn:focus-visible, .kit-tab:focus-visible, .kit-input:focus-visible, .kit-alert-x:focus-visible, .kit-tabpanel:focus-visible, .kit-dialog:focus-visible {
+  outline: 2px solid var(--color-ring); outline-offset: 2px; }
+
+/* Spinner and skeleton */
+.kit-spinner { display: inline-flex; }
+.kit-spinner-ring { width: 1em; height: 1em; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: kit-spin .7s linear infinite; }
+.kit-skel-group { display: flex; flex-direction: column; gap: .6em; }
+.kit-skel { display: block; border-radius: 6px; background: linear-gradient(90deg, var(--color-muted), rgba(var(--line-rgb), .18), var(--color-muted)); background-size: 200% 100%; animation: kit-shimmer 1.4s ease-in-out infinite; }
+@keyframes kit-spin { to { transform: rotate(360deg); } }
+@keyframes kit-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { .kit-spinner-ring, .kit-skel { animation-duration: 3s; } .kit-btn { transition: none; } }
+
+/* Alert */
+.kit-alert { --tone: var(--accent-rgb); display: flex; align-items: flex-start; gap: .75em; padding: .75em 1em; border-radius: calc(var(--radius) * .7);
+  border: 1px solid rgba(var(--tone), .5); background: rgba(var(--tone), .12); }
+.kit-alert-body { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.kit-alert-body strong { display: block; }
+.kit-alert-success { --tone: 56, 225, 165; } .kit-alert-warning { --tone: 255, 200, 87; } .kit-alert-danger { --tone: 255, 92, 122; }
+.kit-alert-x { background: none; border: 0; color: inherit; font-size: 1.25em; line-height: 1; cursor: pointer; padding: 0 .25em; border-radius: 4px; }
+
+/* Empty state */
+.kit-empty { text-align: center; padding: 2.5em 1em; color: var(--color-muted-foreground); display: flex; flex-direction: column; align-items: center; gap: .5em; }
+.kit-empty-icon { font-size: 2em; }
+.kit-empty-title { margin: 0; color: var(--color-foreground); font-size: 1.1em; }
+.kit-empty-desc { margin: 0; max-width: 42ch; }
+
+/* Field */
+.kit-field { display: flex; flex-direction: column; gap: .35em; }
+.kit-label { font-weight: 600; }
+.kit-req { color: var(--color-destructive); }
+.kit-input { font: inherit; min-height: 40px; padding: .4em .75em; color: var(--color-foreground); background: var(--color-muted); border: 1px solid var(--color-border); border-radius: calc(var(--radius) * .7); width: 100%; box-sizing: border-box; }
+.kit-field-invalid .kit-input { border-color: var(--color-destructive); }
+.kit-hint { color: var(--color-muted-foreground); font-size: .875em; }
+.kit-error { color: var(--color-destructive); font-size: .875em; }
+
+/* Tabs */
+.kit-tablist { display: flex; gap: .25em; border-bottom: 1px solid var(--color-border); overflow-x: auto; }
+.kit-tab { font: inherit; background: none; border: 0; border-bottom: 2px solid transparent; color: var(--color-muted-foreground); padding: .6em 1em; cursor: pointer; white-space: nowrap; min-height: 40px; }
+.kit-tab-on { color: var(--color-foreground); border-bottom-color: var(--color-primary); }
+.kit-tab[disabled] { opacity: .5; cursor: not-allowed; }
+.kit-tabpanel { padding: 1em 0; }
+
+/* Dialog */
+.kit-backdrop { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; padding: 1em; background: rgba(0, 0, 0, .6); }
+.kit-dialog { width: min(32rem, 100%); max-height: 90vh; display: flex; flex-direction: column; background: var(--surface-deep); color: var(--color-foreground);
+  border: 1px solid var(--color-border); border-radius: var(--radius); }
+.kit-dialog-head { display: flex; align-items: center; justify-content: space-between; gap: 1em; padding: 1em 1.25em; border-bottom: 1px solid var(--color-border); }
+.kit-dialog-head h2 { margin: 0; font-size: 1.1em; }
+.kit-dialog-body { padding: 1.25em; overflow-y: auto; }
+.kit-dialog-foot { display: flex; justify-content: flex-end; gap: .5em; padding: 1em 1.25em; border-top: 1px solid var(--color-border); flex-wrap: wrap; }
+@media (max-width: 480px) { .kit-backdrop { align-items: flex-end; padding: 0; } .kit-dialog { border-radius: var(--radius) var(--radius) 0 0; width: 100%; } }
