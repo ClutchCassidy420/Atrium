@@ -187,7 +187,20 @@ class Throttle:
         self.max_fails = max_fails
         self.lock_s = lock_s
         self.lock = threading.Lock()
-        self.fails: dict[str, list] = {}   # key -> [count, locked_until]
+        self.fails: dict[str, list] = {}   # key -> [count, locked_until, last_failure]
+
+    MAX_TRACKED = 10000                    # cap on remembered addresses and names, so a flood of made-up usernames cannot grow memory
+
+    def _evict(self, now: float) -> None:
+        """Forget entries that are no longer locked and have not failed for a full lockout period; if still too many, the oldest go."""
+        stale = [k for k, r in self.fails.items() if r[1] <= now and now - r[2] > self.lock_s]
+        for k in stale:
+            del self.fails[k]
+        for k in sorted(self.fails, key=lambda k: self.fails[k][2]):
+            if len(self.fails) < self.MAX_TRACKED:       # leaves room for the entry about to be added
+                break
+            if self.fails[k][1] <= now:                  # never drop an active lockout
+                del self.fails[k]
 
     def locked(self, who: str) -> int:
         """Seconds left on the lockout, or 0."""
@@ -199,9 +212,13 @@ class Throttle:
 
     def failed(self, who: str) -> None:
         with self.lock:
-            rec = self.fails.setdefault(who, [0, 0.0])
-            if rec[1] and rec[1] <= time.time():
+            now = time.time()
+            if who not in self.fails and len(self.fails) >= self.MAX_TRACKED:
+                self._evict(now)
+            rec = self.fails.setdefault(who, [0, 0.0, now])
+            if rec[1] and rec[1] <= now:
                 rec[0], rec[1] = 0, 0.0
+            rec[2] = now
             rec[0] += 1
             if rec[0] >= self.max_fails:
                 rec[1] = time.time() + self.lock_s

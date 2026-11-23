@@ -84,7 +84,8 @@ def make_app(cfg: configmod.Config | None = None, hermes: Hermes | None = None, 
     def same_origin(request: Request) -> bool:
         origin = request.headers.get("origin")
         if not origin:
-            return True
+            # No Origin header: command-line tools and older requests. A browser that says the request came from another site is refused.
+            return request.headers.get("sec-fetch-site", "").lower() != "cross-site"
         return urlsplit(origin).netloc == request.headers.get("host", "")
 
     def page_doc(body: str, title: str, status: int = 200, shell: bool = False, theme: str = "") -> HTMLResponse:

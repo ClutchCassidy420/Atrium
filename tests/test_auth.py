@@ -155,3 +155,31 @@ def test_cli_session_revocation_is_visible_to_running_web_app(tmp_path):
     web.create("carol")
     assert cli.get(old) is None
     assert web.get(other)["user"] == "bob"
+
+
+def test_throttle_memory_is_capped_and_keeps_active_lockouts():
+    t = auth.Throttle(max_fails=2, lock_s=900)
+    t.MAX_TRACKED = 50
+    t.failed("locked"); t.failed("locked")
+    assert t.locked("locked") > 0
+    for i in range(500):
+        t.failed("user:made-up-%d" % i)
+    assert len(t.fails) <= 51
+    assert t.locked("locked") > 0                      # a real lockout is never evicted
+
+
+def test_throttle_forgets_old_failures():
+    t = auth.Throttle(max_fails=3, lock_s=10)
+    t.MAX_TRACKED = 5
+    t.failed("old")
+    t.fails["old"][2] -= 100
+    for i in range(5):
+        t.failed("n%d" % i)
+    assert "old" not in t.fails
+
+
+def test_a_browser_marked_cross_site_is_refused_even_without_origin(make):
+    c = make()
+    login(c)
+    assert c.post("/logout", headers={"sec-fetch-site": "cross-site"}).status_code == 403
+    assert c.post("/logout").status_code == 303
