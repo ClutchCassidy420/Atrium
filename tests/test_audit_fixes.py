@@ -211,7 +211,7 @@ def test_the_file_type_check_reads_only_the_start_of_the_file(tmp_path, monkeypa
 def test_every_document_reader_the_chat_imports_is_pinned():
     import re
     root = Path(__file__).resolve().parent.parent
-    page = (root / "app" / "chat_backend.py").read_text(encoding="utf-8")
+    page = "\n".join((root / "app" / name).read_text(encoding="utf-8") for name in ("chat_backend.py", "docreader.py"))   # the readers live in docreader.py
     needed = {"pypdf": "pypdf" if "from pypdf import" in page else None, "python-docx": "python-docx" if re.search(r"^\s+import docx$", page, re.M) else None,
               "openpyxl": "openpyxl" if re.search(r"^\s+import openpyxl$", page, re.M) else None, "python-pptx": "python-pptx" if "from pptx import" in page else None}
     assert all(needed.values()), "this test expects the page to read PDF, Word, Excel and PowerPoint: %s" % needed

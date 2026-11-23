@@ -45,13 +45,11 @@ try:
 except ImportError:
     fcntl = None
 import json
-import math
 import os
 import re
 import struct
 import threading
 import time
-import zlib
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -62,6 +60,8 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from pydantic import BaseModel, Field
 
 import chat_model
+from docreader import extract as _extract
+from pngicons import draw_badge, draw_icon
 from agentkit import (atomic_write_text, AgentRoute as _AgentRoute, agent_name as _agent_name, fill_text as _T, api_base as _api_base,
                       api_key as _api_key, call as _call, check_run_id as _check_run_id, hermes_home as _hermes_home,
                       RUN_ID_RE, valid_agent_name, save_agent_name)
@@ -193,8 +193,6 @@ async def image(path: str) -> FileResponse:
 # reads text: no macros, no OCR, nothing inside the document is ever run.
 
 MAX_DOC_BYTES = 50 * 1024 * 1024
-MAX_UNPACKED_BYTES = 400 * 1024 * 1024      # zip-bomb guard for Word / Excel / PowerPoint
-PREVIEW_CHARS = 1500
 _DOC_EXTS = {".pdf", ".docx", ".xlsx", ".pptx", ".csv", ".tsv", ".txt", ".md", ".json", ".log"}
 
 
@@ -203,92 +201,10 @@ def _doc_dirs() -> tuple[Path, Path]:
     return base / "uploads", base / "kept-docs"
 
 
-def _scrub(text: str) -> str:
-    text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", " ", text or "")
-    text = re.sub(r"[ \t]+", " ", text)
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    return text.strip()
-
-
 def _safe_name(name: str) -> str:
     name = os.path.basename((name or "").replace("\\", "/")).strip()
     name = re.sub(r"[^\w.\- ()&,]", "_", name)[:120].strip(" .")
     return name or "document"
-
-
-def _check_zip(path: Path) -> None:
-    import zipfile
-    with zipfile.ZipFile(path) as z:
-        total = sum(i.file_size for i in z.infolist())
-        if total > MAX_UNPACKED_BYTES or len(z.infolist()) > 20000:
-            raise ValueError("That file unpacks to something far too big to be a normal document.")
-        if any(i.filename.lower().endswith("vbaproject.bin") for i in z.infolist()):
-            raise ValueError("That file contains macros. Save a copy without macros and attach that.")
-
-
-def _extract(path: Path, ext: str) -> dict:
-    """Return {"kind", "pages", "preview"}; raises ValueError with a plain message when the file is not usable."""
-    with path.open("rb") as source:
-        head = source.read(8)
-    if ext == ".pdf":
-        if not head.startswith(b"%PDF"):
-            raise ValueError("That does not look like a real PDF.")
-        from pypdf import PdfReader
-        rd = PdfReader(str(path))
-        if rd.is_encrypted:
-            raise ValueError("That PDF is password protected. Remove the password and try again.")
-        n = len(rd.pages)
-        out = ""
-        for page in rd.pages[:6]:
-            out += (page.extract_text() or "") + "\n\n"
-            if len(out) > PREVIEW_CHARS * 2:
-                break
-        return {"kind": "PDF", "pages": n, "preview": _scrub(out)[:PREVIEW_CHARS],
-                "scanned": not _scrub(out) and n > 0}
-    if ext in (".docx", ".xlsx", ".pptx"):
-        if not head.startswith(b"PK"):
-            raise ValueError("That does not look like a real %s file." % ext.lstrip("."))
-        _check_zip(path)
-        if ext == ".docx":
-            import docx
-            d = docx.Document(str(path))
-            paras = [p.text for p in d.paragraphs if p.text.strip()]
-            text = "\n".join(paras)
-            return {"kind": "Word document", "pages": None, "preview": _scrub(text)[:PREVIEW_CHARS],
-                    "extra": "%d paragraphs, %d tables" % (len(paras), len(d.tables))}
-        if ext == ".xlsx":
-            import openpyxl
-            wb = openpyxl.load_workbook(str(path), read_only=True, data_only=True)
-            try:
-                names = wb.sheetnames
-                lines = []
-                ws = wb[names[0]] if names else None
-                if ws is not None:
-                    for i, row in enumerate(ws.iter_rows(values_only=True)):
-                        if i >= 12:
-                            break
-                        lines.append(" | ".join("" if c is None else str(c) for c in row[:12]))
-                return {"kind": "Excel workbook", "pages": None, "preview": _scrub("\n".join(lines))[:PREVIEW_CHARS],
-                        "extra": "sheets: " + ", ".join(names[:10]) + ("…" if len(names) > 10 else "")}
-            finally:
-                wb.close()
-        from pptx import Presentation
-        pr = Presentation(str(path))
-        lines = []
-        for idx, slide in enumerate(pr.slides, 1):
-            if idx > 8:
-                break
-            bits = [sh.text_frame.text.strip() for sh in slide.shapes if getattr(sh, "has_text_frame", False) and sh.text_frame.text.strip()]
-            if bits:
-                lines.append("Slide %d: %s" % (idx, " / ".join(bits)[:300]))
-        return {"kind": "PowerPoint deck", "pages": len(pr.slides), "preview": _scrub("\n".join(lines))[:PREVIEW_CHARS]}
-    # plain text family
-    raw = path.read_bytes()[:200_000]
-    if b"\x00" in raw:
-        raise ValueError("That looks like a binary file, not text.")
-    text = raw.decode("utf-8", errors="replace")
-    return {"kind": "text file", "pages": None, "preview": _scrub(text)[:PREVIEW_CHARS],
-            "extra": "%d lines in the part read" % (text.count("\n") + 1)}
 
 
 def _purge_old_uploads(days: int = 30) -> int:
@@ -841,91 +757,13 @@ async def manifest() -> JSONResponse:
     }, media_type="application/manifest+json", headers={"Cache-Control": "no-cache"})
 
 
-def _draw_icon(size: int, scale: float) -> bytes:
-    """The Watcher's great eye on a deep-space square, as a PNG (no image libraries needed)."""
-    ss = 2
-    rows = bytearray()
-    for y in range(size):
-        rows.append(0)
-        for x in range(size):
-            acc = [0.0, 0.0, 0.0]
-            for sy in range(ss):
-                for sx in range(ss):
-                    u = ((x + (sx + 0.5) / ss) / size - 0.5) / scale
-                    v = ((y + (sy + 0.5) / ss) / size - 0.5) / scale
-                    r2 = u * u + v * v
-                    g = math.exp(-r2 / 0.07)
-                    col = [7 + 105 * 0.5 * g, 9 + 75 * 0.5 * g, 26 + 255 * 0.34 * g]
-                    ax = abs(u)
-                    lid = 0.21 * (1 - (ax / 0.40) ** 2) if ax < 0.40 else -1.0
-                    if lid > 0:
-                        d = lid - abs(v)
-                        if d > 0.012:
-                            col = [10, 12, 30]
-                            ir = math.hypot(u, v * 1.0)
-                            if ir < 0.15:
-                                t = ir / 0.15
-                                col = [255 * (1 - 0.15 * t) , 130 + 110 * (1 - t), 195 + 60 * (1 - t)]
-                                if abs(u) < 0.022 and abs(v) < 0.125:
-                                    col = [6, 4, 14]
-                        elif d > -0.01:
-                            col = [175, 140, 255]
-                    elif lid > -1.0 and abs(v) < 0.012 + 0.0 and ax < 0.42:
-                        col = [150, 120, 255]
-                    # a small pink bow on top
-                    bx, by = u - 0.0, v + 0.26
-                    if abs(by) < 0.07 and ((abs(bx) - 0.03) / 0.10) ** 2 + (by / 0.065) ** 2 < 1 and abs(bx) > 0.012:
-                        col = [255, 111, 181]
-                    elif bx * bx + by * by < 0.0007:
-                        col = [214, 70, 140]
-                    for i in range(3):
-                        acc[i] += col[i]
-            for i in range(3):
-                rows.append(max(0, min(255, int(acc[i] / (ss * ss)))))
-
-    def chunk(tag: bytes, body: bytes) -> bytes:
-        return struct.pack(">I", len(body)) + tag + body + struct.pack(">I", zlib.crc32(tag + body) & 0xFFFFFFFF)
-
-    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", size, size, 8, 2, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(bytes(rows), 9)) + chunk(b"IEND", b"")
-
-
-def _draw_badge(size: int = 96) -> bytes:
-    """A white eye on a transparent background: the status-bar badge Android expects."""
-    ss = 3
-    rows = bytearray()
-    for y in range(size):
-        rows.append(0)
-        for x in range(size):
-            cov = 0
-            for sy in range(ss):
-                for sx in range(ss):
-                    u = ((x + (sx + 0.5) / ss) / size - 0.5) / 0.92
-                    v = ((y + (sy + 0.5) / ss) / size - 0.5) / 0.92
-                    ax = abs(u)
-                    lid = 0.24 * (1 - (ax / 0.46) ** 2) if ax < 0.46 else -1.0
-                    inside = False
-                    if lid > 0:
-                        d = lid - abs(v)
-                        ring = 0 < d < 0.06
-                        iris = math.hypot(u, v) < 0.17 and not (abs(u) < 0.028 and abs(v) < 0.14)
-                        inside = ring or iris
-                    if inside:
-                        cov += 1
-            rows += bytes((255, 255, 255, int(255 * cov / (ss * ss))))
-
-    def chunk(tag: bytes, body: bytes) -> bytes:
-        return struct.pack(">I", len(body)) + tag + body + struct.pack(">I", zlib.crc32(tag + body) & 0xFFFFFFFF)
-
-    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", size, size, 8, 6, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(bytes(rows), 9)) + chunk(b"IEND", b"")
-
-
 @router.get("/icon-{name}.png")
 async def icon(name: str) -> Response:
     spec = {"192": (192, 1.0), "512": (512, 1.0), "maskable": (512, 0.72), "badge": (96, 1.0)}.get(name)
     if not spec:
         raise HTTPException(status_code=404, detail="Not found.")
     if name not in _icons:
-        _icons[name] = await asyncio.to_thread(_draw_badge if name == "badge" else _draw_icon, *((spec[0],) if name == "badge" else spec))
+        _icons[name] = await asyncio.to_thread(draw_badge if name == "badge" else draw_icon, *((spec[0],) if name == "badge" else spec))
     return Response(_icons[name], media_type="image/png", headers={"Cache-Control": "public, max-age=86400"})
 
 
