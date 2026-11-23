@@ -90,6 +90,7 @@ State lives in small JSON files written with write-then-rename (`agentkit.atomic
 | 12 | One process and in-memory state (`last_run` and `owner_of` in `main.py`, the mission and room locks, mission state, the login throttle). | Cannot run more than one worker without changes; state lost on restart. | **Open, documented** (section 3). |
 | 13 | `pages/live/engine.js` is 1.1 MB and is sent as it is, uncompressed. | Slow first load of the Live page unless the proxy compresses. | **Open.** Compress in the reverse proxy: a compressing layer inside the app can hold back chat's streamed replies. |
 | 14 | About 40 synchronous `read_text` / `json.load` calls in handlers. | Small event-loop stalls under load. | **Open**; none was on a hot path. |
+| 15 | The sign-in throttle kept one entry per address or username forever (a flood of made-up names grew memory without limit), and a request with no `Origin` header skipped the origin check. | Slow memory growth under abuse; a small gap for cross-site requests from older clients. | **Fixed** (2026-11-23): `Throttle` forgets stale entries and is capped at 10,000, never dropping an active lockout; a request with no `Origin` is refused when the browser marks it `Sec-Fetch-Site: cross-site`; 3 tests. Left as designed: five wrong passwords for one username lock that account from every address (a tested behavior), so a stranger can lock an account for 15 minutes. |
 
 ## 3. Scalability assessment (reasoning from the code; not load-tested)
 
