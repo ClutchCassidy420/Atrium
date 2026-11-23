@@ -175,7 +175,7 @@
     return h("div", { className: "atr-page" },
       h("aside", { className: "atr-side" + (side ? " atr-side-open" : "") },
         h("button", { type: "button", className: "atr-btn atr-btn-primary atr-new", onClick: newRoom }, "+ New room"),
-        h("div", { className: "atr-list" }, !list ? h("div", { className: "atr-muted" }, "Loading…") : !list.length ? h("div", { className: "atr-muted" }, "No rooms yet. Start one.") : list.map(function (r) {
+        h("div", { className: "atr-list" }, !list ? h(window.__APP_UI__.kit.Loading, { label: "Loading…" }) : !list.length ? h(window.__APP_UI__.kit.EmptyState, { icon: "💬", title: "No rooms yet", description: "Start one to get going." }) : list.map(function (r) {
           return h("button", { key: r.id, type: "button", className: "atr-room" + (r.id === cur ? " atr-room-on" : ""), onClick: function () { setCur(r.id); setSide(false); } },
             h("span", { className: "atr-room-t" }, r.title), h("span", { className: "atr-room-s" }, r.count + " messages" + (r.running ? " · answering" : "")));
         }))),

@@ -423,7 +423,7 @@
     }, [query]);
 
     if (err) return h("div", { className: "atm-page" }, h("div", { className: "atm-err" }, err));
-    if (!data) return h("div", { className: "atm-page" }, h("div", { className: "atm-muted" }, "Loading {{agent}}'s notes…"));
+    if (!data) return h("div", { className: "atm-page" }, h(window.__APP_UI__.kit.Loading, { label: "Loading {{agent}}'s notes…" }));
 
     var hl = null;
     if (results) { hl = {}; results.forEach(function (r) { hl[r.id] = 1; }); }

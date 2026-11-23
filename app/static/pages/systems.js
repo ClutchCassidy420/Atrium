@@ -81,7 +81,7 @@
 
   function Page() {
     var a = UI.usePoll("/api/systems", 30000), d = a[0], err = a[1];
-    if (!d) return h("div", { className: "hm" }, h("p", { className: "hm-sub" }, err ? "Could not load: " + err : "Loading…"));
+    if (!d) return h("div", { className: "hm" }, err ? h(window.__APP_UI__.kit.Alert, { tone: "danger", title: "Could not load the systems" }, err) : h(window.__APP_UI__.kit.Loading, { label: "Loading…" }));
     var bad = d.services.concat(d.websites).filter(function (s) { return s.state === "down"; }).length;
     return h("div", { className: "hm" },
       h("header", { className: "hm-top" }, h("div", null, h("h1", null, "Systems"), h("p", { className: "hm-sub" }, "Updated " + UI.ago(d.generated))),

@@ -1,7 +1,7 @@
 /* Atrium UI kit: reusable, accessible components for framework and instance pages. Plain script, no build step, like
    common.js. Load it after common.js and kit.css; everything lives on window.__APP_UI__.kit (alias UI.kit).
 
-   Components:  Button, Spinner, Skeleton, Alert, EmptyState, AsyncView, Field, Tabs, Dialog
+   Components:  Button, Spinner, Loading, Skeleton, Alert, EmptyState, AsyncView, Field, Tabs, Dialog
    Hooks:       useAsync(fn, deps), useId(prefix), useDisclosure(initial)
    Conventions: every component takes `className` (appended) and passes through unknown DOM props via `...rest`-style
                 `attrs`; state is expressed as props (`loading`, `disabled`, `invalid`), never by swapping components;
@@ -53,6 +53,11 @@
   kit.Spinner = function (p) {
     return h("span", merge({ className: cx("kit-spinner", p.className), role: p.label ? "status" : undefined, "aria-hidden": p.label ? undefined : "true" }, p.attrs),
       h("span", { className: "kit-spinner-ring" }), p.label ? h("span", { className: "kit-sr" }, p.label) : null);
+  };
+
+  /* <Loading label="Loading files…" /> : a spinner with text, announced politely; for sections that have no skeleton yet. */
+  kit.Loading = function (p) {
+    return h("div", { className: cx("kit-loading", p.className), role: "status" }, h(kit.Spinner, null), h("span", null, p.label || "Loading…"));
   };
 
   /* <Skeleton lines={3} /> or <Skeleton height={120} />. Purely visual: aria-hidden; the parent carries aria-busy. */

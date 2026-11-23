@@ -106,7 +106,7 @@
     useEffect(function () {
       fetchJSON(API + "/interests").then(function (r) { setTopics(r.topics); setSaved(r.topics); setMax(r.max || 12); }).catch(function (e) { setMsg(errText(e)); });
     }, []);
-    if (!topics) return h("div", { className: "atw-card" }, h("div", { className: "atw-name" }, "Radar topics"), h("div", { className: "atw-note" }, msg || "Loading…"));
+    if (!topics) return h("div", { className: "atw-card" }, h("div", { className: "atw-name" }, "Radar topics"), msg ? h("div", { className: "atw-note" }, msg) : h(window.__APP_UI__.kit.Loading, { label: "Loading…" }));
     var dirty = JSON.stringify(topics) !== JSON.stringify(saved);
     function add() {
       var v = input.trim();
@@ -140,7 +140,7 @@
     var items = props.items;
     return h("div", { className: "atw-card" },
       h("div", { className: "atw-card-head" }, h("div", { className: "atw-name" }, "What {{agent}} did by herself")),
-      !items ? h("div", { className: "atw-note" }, "Loading…")
+      !items ? h(window.__APP_UI__.kit.Loading, { label: "Loading…" })
         : !items.length ? h("div", { className: "atw-note" }, "Nothing yet. Calendar changes and saved files will show up here.")
         : h("div", { className: "atw-feed" }, items.map(function (it, i) {
           return h("div", { key: i, className: "atw-feed-row" },
@@ -182,7 +182,7 @@
       h("div", { className: "atw-sub" }, "{{agent}}'s scheduled jobs. Times are your local time."),
       err ? h("div", { className: "atw-err" }, err) : null,
       h("div", { className: "atw-grid" },
-        !jobs ? h("div", { className: "atw-note" }, "Loading…") : jobs.map(function (j) { return h(JobCard, { key: j.id, job: j, busy: busy === j.id, onRun: run, onToggle: toggle }); })),
+        !jobs ? h(window.__APP_UI__.kit.Loading, { label: "Loading…" }) : jobs.map(function (j) { return h(JobCard, { key: j.id, job: j, busy: busy === j.id, onRun: run, onToggle: toggle }); })),
       h("div", { className: "atw-grid atw-grid-2" }, h(Interests, null), h(Activity, { items: act })));
   }
 

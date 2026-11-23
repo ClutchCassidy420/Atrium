@@ -59,7 +59,7 @@
         h("label", { className: "ml-fl" }, h("span", null, "Subject"), h("input", { className: "hm-input", value: f.subject, onChange: function (x) { set("subject", x.target.value); } })),
         h("textarea", { className: "hm-textarea ml-body", rows: 14, value: f.body, autoFocus: !!init.to, placeholder: "Write your message…", onChange: function (x) { set("body", x.target.value); } }),
         files.length ? h("div", { className: "ml-files" }, files.map(function (fl, i) { return h("span", { key: i, className: "ml-file" }, "📎 " + fl.name + " (" + size(fl.size) + ")", h("button", { type: "button", "aria-label": "Remove " + fl.name, onClick: function () { setFiles(files.filter(function (_, j) { return j !== i; })); } }, "×")); })) : null,
-        msg ? h("p", { className: "hm-err", role: "alert" }, msg) : null,
+        msg ? h(window.__APP_UI__.kit.Alert, { tone: "danger" }, msg) : null,
         h("div", { className: "ml-ca" },
           h("input", { type: "file", multiple: true, hidden: true, ref: inp, onChange: function (x) { pick(x.target.files); x.target.value = ""; } }),
           h("button", { type: "button", className: "hm-btn hm-btn-ghost", onClick: function () { inp.current && inp.current.click(); } }, "📎 Attach"),
@@ -165,7 +165,7 @@
     }
     function forward() { setCompose({ title: "Forward", subject: /^fwd?:/i.test(msg.subject) ? msg.subject : "Fwd: " + msg.subject, body: "\n\n---------- Forwarded message ----------\nFrom: " + addrLine([msg.from]) + "\nDate: " + full(msg.date) + "\nSubject: " + msg.subject + "\nTo: " + addrLine(msg.to) + "\n\n" + (msg.text || "") }); }
 
-    if (err && !data && !folders.length) return h("div", { className: "ml" }, h("h1", null, "Email"), h("p", { className: "hm-err" }, err), h("p", { className: "hm-sub" }, "If the mailbox is not connected to this app yet, add its address and an app token to the app's private config."));
+    if (err && !data && !folders.length) return h("div", { className: "ml" }, h("h1", null, "Email"), h(window.__APP_UI__.kit.Alert, { tone: "danger", title: "Could not load your mail" }, err), h("p", { className: "hm-sub" }, "If the mailbox is not connected to this app yet, add its address and an app token to the app's private config."));
     var items = (data && data.items) || [], unseen = meta.unseen || 0;
     var titles = { inbox: "Inbox", sent: "Sent", drafts: "Drafts", junk: "Spam", trash: "Trash" };
     return h("div", { className: "ml" + (openUid ? " ml-open" : "") },
@@ -176,18 +176,18 @@
             h("input", { className: "hm-input", type: "search", placeholder: "Search this folder", value: q, "aria-label": "Search mail", onChange: function (x) { setQ(x.target.value); if (!x.target.value) { setQuery(""); setPage(0); } } })),
           h("button", { type: "button", className: "hm-btn hm-btn-ghost", onClick: function () { setTick(tick + 1); }, "aria-label": "Refresh", title: "Refresh" }, "↻"),
           h("button", { type: "button", className: "hm-btn", onClick: function () { setCompose({}); } }, "✎ Write"))),
-      err ? h("p", { className: "hm-err", role: "alert" }, err) : null,
+      err ? h(window.__APP_UI__.kit.Alert, { tone: "danger" }, err) : null,
       note ? h("p", { className: "hm-ok ml-note-ok" }, note) : null,
       h("div", { className: "ml-layout" },
         h("section", { className: "hm-card ml-list" },
-          !data ? h("p", { className: "hm-empty" }, "Loading…") : items.length ? h("ul", { className: "ml-items" }, items.map(function (it) {
+          !data ? h(window.__APP_UI__.kit.Loading, { label: "Loading…" }) : items.length ? h("ul", { className: "ml-items" }, items.map(function (it) {
             return h("li", { key: it.uid, className: "ml-item" + (it.seen ? "" : " ml-unread") + (it.uid === openUid ? " ml-active" : ""), onClick: function () { open(it); }, tabIndex: 0, onKeyDown: function (x) { if (x.key === "Enter") open(it); } },
               h("span", { className: "ml-av", style: { "--h": hue(it.from.email) } }, initial(it.from)),
               h("div", { className: "ml-ib" },
                 h("div", { className: "ml-r1" }, h("span", { className: "ml-from" }, role === "sent" || role === "drafts" ? "To: " + (who(it.to[0]) || "") : who(it.from)), h("span", { className: "ml-date" }, short(it.date))),
                 h("div", { className: "ml-subj" }, it.subject), h("div", { className: "ml-r3" }, it.attach ? h("span", { title: "Has attachments" }, "📎") : null, it.answered ? h("span", { title: "Replied" }, "↩") : null)),
               h("button", { type: "button", className: "ml-star" + (it.flagged ? " ml-on" : ""), "aria-label": it.flagged ? "Remove star" : "Star", onClick: function (ev) { star(it, ev); } }, it.flagged ? "★" : "☆"));
-          })) : h("p", { className: "hm-empty ml-none" }, query ? "Nothing matched “" + query + "”." : "This folder is empty."),
+          })) : h(window.__APP_UI__.kit.EmptyState, { icon: "📭", title: query ? "Nothing matched “" + query + "”" : "This folder is empty" }),
           data && data.pages > 1 ? h("div", { className: "ml-pager" }, h("button", { type: "button", className: "hm-btn hm-btn-ghost", disabled: page <= 0, onClick: function () { setPage(page - 1); } }, "‹ Newer"), h("span", { className: "hm-sub" }, "Page " + (page + 1) + " of " + data.pages), h("button", { type: "button", className: "hm-btn hm-btn-ghost", disabled: page + 1 >= data.pages, onClick: function () { setPage(page + 1); } }, "Older ›")) : null),
         h("section", { className: "hm-card ml-read" }, h(Reader, { msg: msg, loading: loadingMsg, role: role, canBlock: !!props.canBlock, blocking: blocking, onBlock: blockSpam, onBack: function () { setOpenUid(null); setMsg(null); }, onReply: reply, onForward: forward, onDelete: function () { del(msg.uid); }, onJunk: function () { junk(msg.uid); }, onUnread: function () { unread(msg.uid); } }))),
       props.address ? h("p", { className: "hm-fine" }, "Signed in as " + props.address + (props.webmail ? " · " : ""), props.webmail ? h("a", { href: props.webmail, target: "_blank", rel: "noopener noreferrer" }, "Open full webmail ↗") : null) : null,
@@ -198,7 +198,7 @@
     return function Entry() {
       var a = useState(null), st = a[0], set = a[1];
       useEffect(function () { SDK.fetchJSON(API + "/status").then(set, function () { set({}); }); }, []);
-      if (!st) return h("div", { className: "ml" }, h("p", { className: "hm-empty" }, "Loading…"));
+      if (!st) return h("div", { className: "ml" }, h(window.__APP_UI__.kit.Loading, { label: "Loading…" }));
       return h(Page, { role: role, compose: compose, address: st.address, webmail: st.webmail, canBlock: (st.features || []).indexOf("blocklist") >= 0 });
     };
   }

@@ -23,6 +23,8 @@
 @keyframes kit-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
 @media (prefers-reduced-motion: reduce) { .kit-spinner-ring, .kit-skel { animation-duration: 3s; } .kit-btn { transition: none; } }
 
+.kit-loading { display: flex; align-items: center; gap: .6em; padding: 1em; color: var(--color-muted-foreground); }
+
 /* Alert */
 .kit-alert { --tone: var(--accent-rgb); display: flex; align-items: flex-start; gap: .75em; padding: .75em 1em; border-radius: calc(var(--radius) * .7);
   border: 1px solid rgba(var(--tone), .5); background: rgba(var(--tone), .12); }
