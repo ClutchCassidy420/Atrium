@@ -26,6 +26,12 @@ services:
       - /path/to/hermes/data/atrium:/opt/data/atrium
       - /path/to/hermes/data/cron:/opt/data/cron:ro
       - /path/to/hermes/data/obsidian-vault:/opt/data/obsidian-vault:ro
+      # Optional, to edit notes in Settings > Memory: mount the vault folders you want editable writable on top of the read-only vault
+      # (each is a subfolder of the vault, group-writable like atrium above), for example:
+      #   - /path/to/hermes/data/obsidian-vault/Projects:/opt/data/obsidian-vault/Projects
+      # Optional, to edit the agent's skills in Settings > Skills (otherwise they cannot be seen): mount the skills folder writable
+      # (chmod -R g+rwX it first), or add ":ro" to let owners read them without changing them.
+      # - /path/to/hermes/data/skills:/opt/data/skills
     read_only: true
     tmpfs:
       - /tmp:size=16m,nosuid

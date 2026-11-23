@@ -400,9 +400,29 @@
     var m_ = useState(function () { try { return localStorage.getItem("atm-mode") === "classic" ? "classic" : "galaxy"; } catch (e) { return "galaxy"; } }), mode = m_[0], setModeState = m_[1];
     function setMode(m) { setModeState(m); try { localStorage.setItem("atm-mode", m); } catch (e) { /* remembering the choice is optional */ } }
 
+    var st_ = useState(null), status = st_[0], setStatus = st_[1];       // which folders may be written to
+    var ed_ = useState(null), edit = ed_[0], setEdit = ed_[1];           // null, { mode: "edit" } or { mode: "new", folder, title }
+    var K = window.__APP_UI__.kit, JSONH = { "Content-Type": "application/json" };
+    function loadGraph() { return fetchJSON(API + "/graph").then(setData).catch(function (e) { setErr(errText(e)); }); }
     useEffect(function () {
-      fetchJSON(API + "/graph").then(setData).catch(function (e) { setErr(errText(e)); });
+      loadGraph();
+      fetchJSON(API + "/status").then(setStatus).catch(function () { /* editing simply stays off */ });
     }, []);
+    function fail(e) { throw new Error(errText(e)); }
+    function saveEdit(text) {
+      return fetchJSON(API + "/note", { method: "POST", headers: JSONH, body: JSON.stringify({ path: note.id, body: text }) })
+        .then(function () { setEdit(null); openNote(note.id); loadGraph(); }, fail);
+    }
+    function removeNote() {
+      return fetchJSON(API + "/note?path=" + encodeURIComponent(note.id), { method: "DELETE" })
+        .then(function () { setEdit(null); openNote(null); loadGraph(); }, fail);
+    }
+    function createNote(text) {
+      var title = edit.title.trim();
+      if (!title) throw new Error("Give the note a name.");
+      return fetchJSON(API + "/note", { method: "POST", headers: JSONH, body: JSON.stringify({ path: (edit.folder ? edit.folder + "/" : "") + title, body: text.trim() ? text : "# " + title + "\n", create: true }) })
+        .then(function (r) { setEdit(null); openNote(r.id); loadGraph(); }, fail);
+    }
 
     function openNote(id) {
       setSelected(id);
@@ -436,7 +456,9 @@
     return h("div", { className: "atm-page" },
       h("div", { className: "atm-top" },
         h("div", null, h("div", { className: "atm-title" }, "Memory"), h("div", { className: "atm-sub" }, data.nodes.length + " notes · " + data.edges.length + " links · click a dot to read it, drag to move, scroll to zoom")),
-        h("input", { className: "atm-search", type: "search", placeholder: "Search notes…", value: query, onChange: function (e) { setQuery(e.target.value); } })),
+        h("div", { className: "atm-top-tools" },
+          h("input", { className: "atm-search", type: "search", placeholder: "Search notes…", value: query, onChange: function (e) { setQuery(e.target.value); } }),
+          status && (status.root || status.folders.length) ? h(K.Button, { variant: "primary", size: "sm", onClick: function () { setEdit({ mode: "new", folder: status.folders[0] || "", title: "" }); } }, "＋ New note") : null)),
       h("div", { className: "atm-legend" },
         h("div", { className: "atm-seg", role: "group", "aria-label": "View" },
           ["galaxy", "classic"].map(function (m) {
@@ -464,13 +486,22 @@
           note ? h("div", { className: "atm-note" },
             h("div", { className: "atm-note-title" }, note.title),
             h("div", { className: "atm-note-meta" }, note.id + (note.mtime ? " · changed " + when(note.mtime) : "")),
+            h("div", { className: "atm-note-actions" }, note.editable ? h(K.Button, { size: "sm", onClick: function () { setEdit({ mode: "edit" }); } }, "Edit or delete")
+              : h("span", { className: "atm-muted" }, note.cut ? "Too long to edit here." : "Read-only: this folder cannot be changed on this install.")),
             h("div", { className: "atm-body" }, renderMd(note.body || "", openByLink)),
             note.cut ? h("div", { className: "atm-muted" }, "(The rest of this note is cut off.)") : null,
             note.links && note.links.length ? h("div", { className: "atm-rel" }, h("div", { className: "atm-side-title" }, "Links to"), note.links.map(function (l) { return h("button", { key: l.id, type: "button", className: "atm-wiki", onClick: function () { openNote(l.id); } }, l.title); })) : null,
             note.backlinks && note.backlinks.length ? h("div", { className: "atm-rel" }, h("div", { className: "atm-side-title" }, "Linked from"), note.backlinks.map(function (l) { return h("button", { key: l.id, type: "button", className: "atm-wiki", onClick: function () { openNote(l.id); } }, l.title); })) : null)
           : !results ? h("div", { className: "atm-recent" },
             h("div", { className: "atm-side-title" }, "Recently changed"),
-            data.recent.map(function (id) { var n = byId[id]; return n ? h("button", { key: id, type: "button", className: "atm-result", onClick: function () { openNote(id); } }, h("div", { className: "atm-result-t" }, n.title), h("div", { className: "atm-result-s" }, n.folder + " · " + when(n.mtime))) : null; })) : null)));
+            data.recent.map(function (id) { var n = byId[id]; return n ? h("button", { key: id, type: "button", className: "atm-result", onClick: function () { openNote(id); } }, h("div", { className: "atm-result-t" }, n.title), h("div", { className: "atm-result-s" }, n.folder + " · " + when(n.mtime))) : null; })) : null)),
+      edit && edit.mode === "edit" && note ? h(K.EditorDialog, { open: true, title: "Edit: " + note.title, value: note.body || "", onSave: saveEdit, onDelete: removeNote, deleteLabel: "Delete note",
+        deleteNote: "Delete this note? It moves to a hidden .trash folder next to it, so it can be put back from the server.", onClose: function () { setEdit(null); } }) : null,
+      edit && edit.mode === "new" ? h(K.EditorDialog, { open: true, title: "New note", value: "", placeholder: "Write the note. Link to another with [[Note name]].", saveLabel: "Add note", onSave: createNote, onClose: function () { setEdit(null); },
+        fields: h("div", { className: "kit-row" },
+          h(K.Field, { label: "Folder" }, function (ip) { return h("select", Object.assign({}, ip, { value: edit.folder, onChange: function (x) { setEdit(Object.assign({}, edit, { folder: x.target.value })); } }),
+            (status.root ? [h("option", { key: "", value: "" }, "(top level)")] : []).concat(status.folders.map(function (f) { return h("option", { key: f, value: f }, f); }))); }),
+          h(K.Field, { label: "Name", required: true }, function (ip) { return h("input", Object.assign({}, ip, { type: "text", maxLength: 100, "data-autofocus": "true", value: edit.title, onChange: function (x) { setEdit(Object.assign({}, edit, { title: x.target.value })); } })); })) }) : null);
   }
 
   window.__APP_SUBPAGES__ = Object.assign(window.__APP_SUBPAGES__ || {}, { memory: Page });     // shown inside Settings

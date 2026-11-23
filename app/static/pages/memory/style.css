@@ -65,3 +65,5 @@
   .atm-graph { height: 56vh; }
   .atm-side { max-height: none; }
 }
+.atm-top-tools { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+.atm-note-actions { margin: 0 0 0.7rem; }

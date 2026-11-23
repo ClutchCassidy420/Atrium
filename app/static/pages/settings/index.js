@@ -509,7 +509,8 @@
     { id: "schedule", label: "Schedule", icon: "⏰", note: "When each of the agent's jobs runs.", parts: [Schedule] },
     { id: "persona", label: "Persona", icon: "🎭", note: "Who the agent is and the rules she works by, with every earlier version kept.", parts: [embed("persona", "The persona editor did not load.")] },
     { id: "avatar", label: "Avatar", icon: "🎨", note: "Pick and customise how the agent looks.", parts: [embed("avatar", "The avatar editor did not load.")] },
-    { id: "memory", label: "Memory", icon: "🧠", note: "The agent's notes as a graph: every note a dot, every link a line. Read only.", parts: [embed("memory", "The memory view did not load.")] },
+    { id: "memory", label: "Memory", icon: "🧠", note: "The agent's notes as a graph: every note a dot, every link a line. Open a note to read it; add, edit or delete notes where the server allows it.", parts: [embed("memory", "The memory view did not load.")] },
+    { id: "skills", label: "Skills", icon: "🧩", note: "What the agent knows how to do. Read, add, change or remove a skill; she uses a change from her next session.", parts: [embed("skills", "The skills editor did not load.")] },
     { id: "engine", label: "Cloud use", icon: "☁️", note: "Which engine answers chats from the app, and what the cloud has used.", parts: [Cloud] },
     { id: "model", label: "Chat model", icon: "🧠", note: "Choose an OpenAI-compatible endpoint for new chats.", parts: [ChatModel, MyChatModel] },
     { id: "connections", label: "Connections", icon: "🔌", note: "Connect external tools to Hermes.", parts: [Connections] },
@@ -550,7 +551,7 @@
       h("div", { className: "ats-layout" },
         h("nav", { className: "ats-nav", "aria-label": "Settings sections" }, visible.map(function (x) {
           return h("button", { key: x.id, type: "button", className: "ats-navitem" + (x.id === sec.id ? " ats-current" : ""), "aria-current": x.id === sec.id ? "page" : null, onClick: function () { pick(x.id); } },
-            h("span", { className: "ats-navicon", "aria-hidden": "true", style: { "--h": ({ general: 215, appearance: 300, notifications: 40, schedule: 150, persona: 320, avatar: 275, memory: 185, engine: 205, server: 25 })[x.id] || 260 } }, x.icon), x.label);
+            h("span", { className: "ats-navicon", "aria-hidden": "true", style: { "--h": ({ general: 215, appearance: 300, notifications: 40, schedule: 150, persona: 320, avatar: 275, memory: 185, engine: 205, skills: 95, server: 25 })[x.id] || 260 } }, x.icon), x.label);
         })),
         h("section", { className: "ats-panel", key: sec.id },
           h("h2", { className: "ats-panel-h" }, sec.label),

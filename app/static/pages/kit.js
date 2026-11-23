@@ -1,7 +1,7 @@
 /* Atrium UI kit: reusable, accessible components for framework and instance pages. Plain script, no build step, like
    common.js. Load it after common.js and kit.css; everything lives on window.__APP_UI__.kit (alias UI.kit).
 
-   Components:  Button, Spinner, Loading, Skeleton, Alert, EmptyState, AsyncView, Field, Tabs, Dialog
+   Components:  Button, Spinner, Loading, EditorDialog, Skeleton, Alert, EmptyState, AsyncView, Field, Tabs, Dialog
    Hooks:       useAsync(fn, deps), useId(prefix), useDisclosure(initial)
    Conventions: every component takes `className` (appended) and passes through unknown DOM props via `...rest`-style
                 `attrs`; state is expressed as props (`loading`, `disabled`, `invalid`), never by swapping components;
@@ -215,6 +215,41 @@
         h("div", { className: "kit-dialog-body" }, p.children),
         p.footer ? h("footer", { className: "kit-dialog-foot" }, p.footer) : null));
     return window.ReactDOM && window.ReactDOM.createPortal ? window.ReactDOM.createPortal(node, document.body) : node;
+  };
+
+  /* <EditorDialog open title value onSave(text) onDelete() onClose fields readOnly readOnlyNote placeholder deleteLabel deleteNote />
+     A dialog for changing a piece of text (a note, a skill): a large monospace box, optional `fields` above it, Save, and an optional
+     two-step Delete. onSave and onDelete return promises; a rejection's message is shown in the dialog and nothing is lost. With
+     `readOnly` the text can be read but not changed. */
+  kit.EditorDialog = function (p) {
+    var s = useState(p.value || ""), text = s[0], setText = s[1];
+    var b = useState(false), busy = b[0], setBusy = b[1];
+    var e = useState(""), err = e[0], setErr = e[1];
+    var c = useState(false), confirm = c[0], setConfirm = c[1];
+    var id = kit.useId("ed");
+    useEffect(function () { if (p.open) { setText(p.value || ""); setErr(""); setConfirm(false); setBusy(false); } }, [p.open, p.value]);
+    function run(fn) {
+      setBusy(true); setErr("");
+      Promise.resolve().then(fn).then(function () { setBusy(false); }, function (x) { setBusy(false); setErr(x && x.message ? x.message : String(x || "Something went wrong")); });
+    }
+    var ro = !!p.readOnly;
+    var foot = [];
+    if (!ro && p.onDelete) {
+      foot.push(confirm
+        ? h("span", { key: "dc", className: "kit-confirm" }, h("span", null, p.deleteNote || "Delete this?"),
+            h(kit.Button, { size: "sm", variant: "danger", loading: busy, onClick: function () { run(p.onDelete); } }, "Yes, delete"),
+            h(kit.Button, { size: "sm", variant: "ghost", disabled: busy, onClick: function () { setConfirm(false); } }, "Keep it"))
+        : h(kit.Button, { key: "d", variant: "ghost", className: "kit-foot-left", disabled: busy, onClick: function () { setConfirm(true); } }, p.deleteLabel || "Delete"));
+    }
+    foot.push(h(kit.Button, { key: "c", disabled: busy, onClick: p.onClose }, ro ? "Close" : "Cancel"));
+    if (!ro) foot.push(h(kit.Button, { key: "s", variant: "primary", loading: busy, onClick: function () { run(function () { return p.onSave(text); }); } }, p.saveLabel || "Save"));
+    return h(kit.Dialog, { open: !!p.open, onClose: p.onClose, title: p.title, className: "kit-dialog-wide", footer: foot },
+      ro ? h(kit.Alert, { tone: "info", className: "kit-gap" }, p.readOnlyNote || "This is read-only here.") : null,
+      err ? h(kit.Alert, { tone: "danger", className: "kit-gap", onDismiss: function () { setErr(""); } }, err) : null,
+      p.fields || null,
+      h("label", { className: "kit-label kit-sr", htmlFor: id }, p.title),
+      h("textarea", { id: id, className: "kit-input kit-textarea", value: text, readOnly: ro, spellCheck: false, placeholder: p.placeholder || "",
+        "data-autofocus": p.fields ? undefined : "true", onChange: function (x) { setText(x.target.value); } }));
   };
 
   UI.kit = kit;
