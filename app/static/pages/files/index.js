@@ -66,7 +66,10 @@
 
     var crumbs = [{ name: "All files", path: "" }];
     path.split("/").filter(Boolean).forEach(function (seg, i, arr) { crumbs.push({ name: seg, path: arr.slice(0, i + 1).join("/") }); });
-    if (err && !data) return h("div", { className: "fl" }, h("h1", null, "Files"), h("p", { className: "hm-err" }, err), h("p", { className: "hm-sub" }, "If Nextcloud is not connected to this app yet, add its address and an app password to the app's private config."));
+    var K = UI.kit;
+    if (err && !data) return h("div", { className: "fl" }, h("h1", null, "Files"),
+      h(K.Alert, { tone: "danger", title: "Could not load your files", action: h(K.Button, { size: "sm", onClick: refresh }, "Try again") }, err),
+      h("p", { className: "hm-sub" }, "If Nextcloud is not connected to this app yet, add its address and an app password to the app's private config."));
 
     return h("div", { className: "fl" + (over ? " fl-over" : ""), onDragOver: function (ev) { ev.preventDefault(); setOver(true); }, onDragLeave: function (ev) { if (ev.currentTarget === ev.target) setOver(false); }, onDrop: onDrop },
       h("header", { className: "fl-top" },
@@ -79,10 +82,10 @@
       h("nav", { className: "fl-crumbs", "aria-label": "Folder path" }, crumbs.map(function (cr, i) {
         return h(SDK.React.Fragment, { key: cr.path }, i ? h("span", { className: "fl-sep" }, "›") : null, i === crumbs.length - 1 ? h("strong", null, cr.name) : h("button", { type: "button", className: "fl-crumb", onClick: function () { setPath(cr.path); } }, cr.name));
       })),
-      err ? h("p", { className: "hm-err", role: "alert" }, err) : null,
+      err ? h(K.Alert, { tone: "danger", className: "fl-alert", onDismiss: function () { setErr(""); } }, err) : null,
       prog ? h("div", { className: "fl-prog", role: "status" }, h("span", null, "Uploading " + prog.name + (prog.of > 1 ? " (" + prog.n + " of " + prog.of + ")" : "")), h("div", { className: "hm-bar" }, h("div", { className: "hm-bar-fill", style: { width: prog.pct + "%", animation: "none" } })), h("b", null, prog.pct + "%")) : null,
       h("div", { className: "hm-card fl-card" },
-        !data ? h("p", { className: "hm-empty" }, "Loading…") : h("div", { className: "fl-list", role: "table" },
+        !data ? h("div", { "aria-busy": "true" }, h(K.Spinner, { label: "Loading files" }), h(K.Skeleton, { lines: 5, height: "2.2em" })) : h("div", { className: "fl-list", role: "table" },
           h("div", { className: "fl-row fl-hd", role: "row" }, h("span", null, "Name"), h("span", { className: "fl-sz" }, "Size"), h("span", { className: "fl-mod" }, "Modified"), h("span", null)),
           path ? h("div", { className: "fl-row fl-up", role: "row" }, h("button", { type: "button", className: "fl-name", onClick: function () { setPath(parent(path)); } }, h("i", null, "↩"), "Up one folder")) : null,
           data.items.length ? data.items.map(function (it) {
@@ -97,7 +100,7 @@
                 ? [h("button", { key: "y", type: "button", className: "hm-btn fl-danger", onClick: function () { setConfirm(null); call("DELETE", "/files?path=" + encodeURIComponent(it.path)); } }, "Delete"), h("button", { key: "n", type: "button", className: "hm-btn hm-btn-ghost", onClick: function () { setConfirm(null); } }, "Keep")]
                 : [h("button", { key: "r", type: "button", className: "fl-ico", title: "Rename", "aria-label": "Rename " + it.name, onClick: function () { setEditing({ path: it.path, value: it.name }); } }, "✏️"),
                   h("button", { key: "d", type: "button", className: "fl-ico", title: "Delete", "aria-label": "Delete " + it.name, onClick: function () { setConfirm(it.path); } }, "🗑️")]));
-          }) : h("p", { className: "hm-empty fl-empty" }, "This folder is empty. Drop files here or press Upload."))),
+          }) : h(K.EmptyState, { icon: "📂", title: "This folder is empty", description: "Drop files anywhere on this page, or press Upload.", action: h(K.Button, { variant: "primary", onClick: function () { inp.current && inp.current.click(); } }, "⬆ Upload") }))),
       note ? h("p", { className: "hm-fine" }, note) : h("p", { className: "hm-fine" }, "Deleted files go to Nextcloud's trash, where they can be restored. Drop files anywhere on this page to upload."));
   }
 
