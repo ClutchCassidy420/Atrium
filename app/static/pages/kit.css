@@ -64,3 +64,10 @@
 .kit-dialog-body { padding: 1.25em; overflow-y: auto; }
 .kit-dialog-foot { display: flex; justify-content: flex-end; gap: .5em; padding: 1em 1.25em; border-top: 1px solid var(--color-border); flex-wrap: wrap; }
 @media (max-width: 480px) { .kit-backdrop { align-items: flex-end; padding: 0; } .kit-dialog { border-radius: var(--radius) var(--radius) 0 0; width: 100%; } }
+.kit-dialog-wide { width: min(46rem, 100%); }
+.kit-gap { margin-bottom: .75em; }
+.kit-textarea { min-height: 40vh; resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .9em; line-height: 1.5; white-space: pre-wrap; }
+.kit-confirm { display: inline-flex; align-items: center; gap: .5em; margin-right: auto; flex-wrap: wrap; }
+.kit-foot-left { margin-right: auto; }
+.kit-row { display: flex; gap: .75em; flex-wrap: wrap; margin-bottom: .75em; }
+.kit-row > * { flex: 1 1 12rem; }

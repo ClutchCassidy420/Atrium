@@ -130,3 +130,8 @@
 .ats-theme-name { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; font-size: 0.9rem; font-weight: 700; }
 .ats-theme-name em { padding: 0 0.5rem; font-style: normal; font-size: 0.66rem; font-weight: 700; border-radius: 999px; background: var(--ats-primary); color: var(--color-primary-foreground, #0b0f1f); }
 .ats-theme-note { font-size: 0.74rem; line-height: 1.4; color: var(--ats-muted); }
+.ats-skills { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.4rem; }
+.ats-skill { display: flex; align-items: center; justify-content: space-between; gap: 0.8rem; padding: 0.55rem 0.7rem; border: 1px solid var(--ats-border); border-radius: 12px; background: rgba(255, 255, 255, 0.03); }
+.ats-skill-text { min-width: 0; }
+.ats-skill-name { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; font-weight: 600; overflow-wrap: anywhere; }
+.ats-skill-name .ats-chip { padding: 0.1rem 0.55rem; font-weight: 400; }

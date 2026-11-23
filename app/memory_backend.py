@@ -13,7 +13,13 @@ Routes (mounted by the Hermes dashboard under /api/plugins/atrium-memory):
   GET /note?path=     one note's text with its links and backlinks
   GET /search?q=      notes whose title or text contain the words
 
-Read-only: nothing here writes to the vault. The vault is <HERMES_HOME>/obsidian-vault.
+Editing (owners only, added in Atrium): the vault's notes can be opened, changed, added and removed from Settings, but only where the
+folder is mounted writable (see deploy/compose.example.yaml); everywhere else the routes say so instead of failing.
+  GET    /status          which folders can be written to
+  POST   /note            create or replace one note   {path, body, create}
+  DELETE /note?path=      move one note to that folder's .trash (Obsidian keeps one too); nothing is erased
+
+The vault is <HERMES_HOME>/obsidian-vault.
 """
 
 from __future__ import annotations
@@ -24,8 +30,11 @@ import re
 from pathlib import Path
 from typing import Optional
 
+import time
+
 from fastapi import APIRouter, HTTPException
-from agentkit import (AgentRoute as _AgentRoute)
+from pydantic import BaseModel, Field
+from agentkit import (AgentRoute as _AgentRoute, atomic_write_text)
 
 # --- the agent's name --------------------------------------------------------------------------------------------
 # Text in this file says {{agent}} wherever it means the agent's name. It is filled in on the way out (JSON, errors,
@@ -185,6 +194,7 @@ async def note(path: str) -> dict:
         rel = target.relative_to(root).as_posix()
         titles = {n["id"]: n["title"] for n in notes}
         return {"id": rel, "title": titles.get(rel, Path(rel).stem), "mtime": mtime, "body": text[:BODY_CHARS], "cut": len(text) > BODY_CHARS,
+                "editable": len(text) <= BODY_CHARS and _can_write(target) and _can_write_dir(target.parent),
                 "links": [{"id": t, "title": titles.get(t, t)} for t in sorted(links.get(rel, set()))],
                 "backlinks": [{"id": s, "title": titles.get(s, s)} for s, ts in links.items() if rel in ts]}
     return await asyncio.to_thread(read)
@@ -207,3 +217,110 @@ async def search(q: str) -> dict:
                 out.append({"id": n["id"], "title": n["title"], "folder": n["folder"], "snippet": snip.strip()[:160]})
         return out[:30]
     return {"results": await asyncio.to_thread(run)}
+
+
+# --- editing (owners only; the router is mounted behind the owner check) -----------------------------------------------------------
+
+_NAME_OK = re.compile(r'^[^\x00-\x1f\\:*?"<>|]{1,120}$')
+READ_ONLY = "That folder is read-only on this install, so notes in it cannot be changed. Ask whoever runs the server to mount it writable."
+
+
+def _can_write(p: Path) -> bool:
+    return p.exists() and os.access(p, os.W_OK)
+
+
+def _can_write_dir(p: Path) -> bool:
+    return p.is_dir() and os.access(p, os.W_OK | os.X_OK)
+
+
+def _clean_rel(path: str) -> str:
+    """A note path such as ``People/Ana.md``: no dots at the start of a part, no ``..``, at most four levels, always ending in .md."""
+    p = (path or "").strip().replace("\\", "/").strip("/")
+    if p and not p.lower().endswith(".md"):
+        p += ".md"
+    parts = p.split("/") if p else []
+    if not parts or len(parts) > 4 or any((not x) or x.startswith(".") or not _NAME_OK.match(x) for x in parts):
+        raise HTTPException(status_code=400, detail="Use a name like People/Ana (no dots at the start, no special characters, at most four folders deep).")
+    return p
+
+
+def _inside(root: Path, p: Path) -> bool:
+    try:
+        p.resolve().relative_to(root.resolve())
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def _nearest_dir(p: Path, root: Path) -> Path:
+    while not p.exists() and p != root and p.parent != p:
+        p = p.parent
+    return p
+
+
+class NoteBody(BaseModel):
+    path: str = Field(max_length=300)
+    body: str = Field(max_length=MAX_NOTE_BYTES)
+    create: bool = False
+
+
+@router.get("/status")
+async def status() -> dict:
+    def run() -> dict:
+        root = _vault()
+        folders = []
+        if root.is_dir():
+            for d in sorted(root.iterdir()):
+                if d.is_dir() and d.name not in _SKIP_DIRS and not d.name.startswith(".") and _can_write_dir(d):
+                    folders.append(d.name)
+        return {"exists": root.is_dir(), "root": _can_write_dir(root), "folders": folders}
+    return await asyncio.to_thread(run)
+
+
+@router.post("/note")
+async def save_note(b: NoteBody) -> dict:
+    rel = _clean_rel(b.path)
+    if len(b.body.encode("utf-8")) > MAX_NOTE_BYTES:
+        raise HTTPException(status_code=413, detail="That note is too long.")
+
+    def write() -> dict:
+        root = _vault()
+        if not root.is_dir():
+            raise HTTPException(status_code=404, detail="There is no notes folder on this install.")
+        target = root / rel
+        if not _inside(root, _nearest_dir(target.parent, root)):
+            raise HTTPException(status_code=400, detail="That path is not allowed.")
+        exists = target.exists()
+        if b.create and exists:
+            raise HTTPException(status_code=409, detail="A note with that name already exists.")
+        if not b.create and not exists:
+            raise HTTPException(status_code=404, detail="That note no longer exists.")
+        if exists and not target.is_file():
+            raise HTTPException(status_code=400, detail="That path is not a note.")
+        if not _can_write_dir(_nearest_dir(target.parent, root)) or (exists and not _can_write(target)):
+            raise HTTPException(status_code=403, detail=READ_ONLY)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_text(target, b.body)
+        return {"id": rel, "mtime": int(target.stat().st_mtime)}
+    return await asyncio.to_thread(write)
+
+
+@router.delete("/note")
+async def delete_note(path: str) -> dict:
+    rel = _clean_rel(path)
+
+    def move() -> dict:
+        root = _vault()
+        target = root / rel
+        if not target.is_file() or not _inside(root, target):
+            raise HTTPException(status_code=404, detail="That note no longer exists.")
+        if not _can_write_dir(target.parent):
+            raise HTTPException(status_code=403, detail=READ_ONLY)
+        trash = target.parent / ".trash"
+        trash.mkdir(exist_ok=True)
+        dest = trash / target.name
+        if dest.exists():
+            dest = trash / (target.stem + "-" + str(int(time.time())) + target.suffix)
+        os.replace(target, dest)
+        return {"id": rel, "kept_in": dest.relative_to(root).as_posix()}
+    return await asyncio.to_thread(move)

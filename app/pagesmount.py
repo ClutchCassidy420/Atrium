@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from connections_backend import connection_router
 from model_setup import model_setup_router
 
-OWNER_PLUGINS = ("memory", "workflows", "settings", "room")
+OWNER_PLUGINS = ("memory", "workflows", "settings", "room", "skills")
 # the only routes of the Mission Control backend that the app mounts (the rest is replaced by the Home page)
 MISSION_ROUTES = ("/focus", "/focus/toggle", "/focus/remove", "/engine", "/soul", "/soul/version", "/soul/restore")
 
@@ -24,7 +24,7 @@ def prefix_for(name: str) -> str:
 def mount_owner_pages(app, cfg, hermes, current, same_origin) -> None:
     if cfg.hermes_data_dir:
         os.environ["HERMES_HOME"] = cfg.hermes_data_dir
-    import kanban_backend, pipeline_backend, live_backend, memory_backend, mission_backend, room_backend, settings_backend, workflows_backend, hostctl_backend
+    import kanban_backend, pipeline_backend, live_backend, memory_backend, mission_backend, room_backend, settings_backend, skills_backend, workflows_backend, hostctl_backend
     vault = os.path.join(cfg.hermes_data_dir or "/opt/data", "obsidian-vault")
     os.environ["OBSIDIAN_VAULT_PATH"] = vault
     mission_backend.HERMES = hermes
@@ -32,7 +32,7 @@ def mount_owner_pages(app, cfg, hermes, current, same_origin) -> None:
     workflows_backend.HERMES = hermes
     settings_backend.HERMES = hermes
     room_backend.SOUL_READER = mission_backend._soul_read      # the soul is read through the Hermes dashboard
-    backends = {"memory": memory_backend, "workflows": workflows_backend, "settings": settings_backend, "room": room_backend}
+    backends = {"memory": memory_backend, "workflows": workflows_backend, "settings": settings_backend, "room": room_backend, "skills": skills_backend}
 
     async def guard(request: Request):
         who = current(request)

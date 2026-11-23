@@ -157,7 +157,8 @@ chats you can reopen and continue, pictures and documents (PDF, Word, Excel, Pow
 
 Three owner-only pages (permission `admin`), each a vendored Atrium Loom plugin whose page is unchanged:
 
-- **Memory** (a section of Settings, owners only; `/memory` redirects to Settings): the agent's notes (an Obsidian-compatible vault) as a graph, with search and a note reader. Read-only.
+- **Memory** (a section of Settings, owners only; `/memory` redirects to Settings): the agent's notes (an Obsidian-compatible vault) as a graph, with search and a note reader. Owners can add, edit and delete notes where the folder is mounted writable (a deleted note moves to a `.trash` folder beside it); everywhere else a note says it is read-only.
+- **Skills** (a section of Settings, owners only): the agent's skills, one `SKILL.md` per folder under `<data>/skills` (optionally inside a category folder). Owners can read, add, change and delete them; a skill must keep a header with a `name:` and a `description:`, and a deleted skill moves to `skills/.trash`. The agent uses a change from her next session. The section needs the skills folder mounted into the app (writable to edit, `:ro` to only read); without it the section says there is no skills folder.
 - **Workflows** (`/workflows`, Work): the scheduled jobs in plain words with run now, pause and resume and the last runs of each; the topics the
   nightly radar searches for (editable); and what the agent did by herself.
 - **Settings** (`/settings`): which pings may buzz a phone and quiet hours, when each job runs, and the subscribed devices.
