@@ -62,7 +62,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from pydantic import BaseModel, Field
 
 import chat_model
-from agentkit import (AgentRoute as _AgentRoute, agent_name as _agent_name, fill_text as _T, api_base as _api_base,
+from agentkit import (atomic_write_text, AgentRoute as _AgentRoute, agent_name as _agent_name, fill_text as _T, api_base as _api_base,
                       api_key as _api_key, call as _call, check_run_id as _check_run_id, hermes_home as _hermes_home,
                       RUN_ID_RE, valid_agent_name, save_agent_name)
 
@@ -701,11 +701,7 @@ def _hold(title: str, text: str, kind: str) -> None:
         held = held[-50:]
         path = _held_path()
         path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(".tmp")
-        fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            json.dump(held, fh)
-        os.replace(str(tmp), str(path))
+        atomic_write_text(path, json.dumps(held), 0o600)
 
 
 def flush_held() -> dict:
@@ -1117,9 +1113,7 @@ async def voice_set(body: VoiceBody) -> dict:
         raise HTTPException(status_code=400, detail="That voice is not available.")
     f = _voice_file()
     f.parent.mkdir(parents=True, exist_ok=True)
-    tmp = f.with_suffix(".tmp")
-    tmp.write_text(json.dumps({"voice": body.voice}), encoding="utf-8")
-    os.replace(tmp, f)
+    atomic_write_text(f, json.dumps({"voice": body.voice}))
     return {"voice": body.voice}
 
 
@@ -1240,9 +1234,7 @@ async def set_notify_settings(body: PrefsBody) -> dict:
     def write() -> None:
         path = _prefs_path()
         path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(prefs), encoding="utf-8")
-        os.replace(str(tmp), str(path))
+        atomic_write_text(path, json.dumps(prefs))
     await asyncio.to_thread(write)
     return {"prefs": prefs, "quiet_now": _in_quiet(prefs)}
 

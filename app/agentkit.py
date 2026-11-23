@@ -193,8 +193,17 @@ def check_run_id(run_id: str) -> str:
     return run_id
 
 
-def atomic_write_text(path: Path, text: str) -> None:
-    """Write beside the target and swap it in, so a crash never leaves a half-written file."""
+def atomic_write_text(path: Path, text: str, mode: Optional[int] = None) -> None:
+    """Write beside the target and swap it in, so a crash never leaves a half-written file.
+
+    With ``mode`` (for example 0o600) the temporary file is created with that permission from the start, so a secret is
+    never readable by others, even for a moment.
+    """
     tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(text, encoding="utf-8")
+    if mode is None:
+        tmp.write_text(text, encoding="utf-8")
+    else:
+        fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
     os.replace(tmp, path)

@@ -49,7 +49,7 @@ from typing import Any, Literal, Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
-from agentkit import (AgentRoute as _AgentRoute, dotenv_value, hermes_home, agent_name as _agent_name, fill_text as _T)
+from agentkit import (atomic_write_text, AgentRoute as _AgentRoute, dotenv_value, hermes_home, agent_name as _agent_name, fill_text as _T)
 
 # --- the agent's name --------------------------------------------------------------------------------------------
 # Text in this file says {{agent}} wherever it means the agent's name. It is filled in on the way out (JSON, errors,
@@ -123,9 +123,7 @@ def _save(room: dict) -> None:
     room["updated"] = time.time()
     room["messages"] = room["messages"][-MAX_STORED:]
     path = d / (room["id"] + ".json")
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(room), encoding="utf-8")
-    os.replace(tmp, path)
+    atomic_write_text(path, json.dumps(room))
 
 
 def _lock(room_id: str) -> asyncio.Lock:

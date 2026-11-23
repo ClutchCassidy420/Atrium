@@ -18,6 +18,8 @@ import threading
 import time
 from pathlib import Path
 
+from agentkit import atomic_write_text
+
 LOG = logging.getLogger(__name__)
 
 SCRYPT_N, SCRYPT_R, SCRYPT_P = 2 ** 15, 8, 1
@@ -121,10 +123,7 @@ class Sessions:
     def _save(self) -> None:
         if not self.path:
             return
-        tmp = self.path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(self.items))
-        os.chmod(tmp, 0o600)
-        tmp.replace(self.path)
+        atomic_write_text(self.path, json.dumps(self.items), 0o600)
         self._stamp = self._file_stamp()
 
     def create(self, user: str, credential: str = "") -> str:

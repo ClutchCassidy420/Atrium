@@ -26,6 +26,8 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 
+from agentkit import atomic_write_text
+
 PREFIX = "/api/code"
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,59}$")
 PASS_GET = ("/projects", "/tree", "/files", "/file", "/git/status", "/git/diff", "/git/checkpoints", "/browser/targets")
@@ -72,9 +74,7 @@ def mount_code(app, cfg, hermes, current, same_origin, owners) -> None:
         return d
 
     def save_store(d: dict) -> None:
-        tmp = store_path.with_name(store_path.name + ".tmp")
-        tmp.write_text(json.dumps(d, indent=1, sort_keys=True), encoding="utf-8")
-        tmp.replace(store_path)
+        atomic_write_text(store_path, json.dumps(d, indent=1, sort_keys=True))
 
     async def guard(request: Request):
         who = current(request)

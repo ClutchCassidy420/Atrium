@@ -6,13 +6,13 @@ or changing a role takes effect at once, even for people who are already signed 
 from __future__ import annotations
 
 import json
-import os
 import re
 import threading
 import time
 from pathlib import Path
 
 from auth import hash_looks_valid, hash_password
+from agentkit import atomic_write_text
 
 USERNAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{1,31}$")
 MIN_PASSWORD = 12
@@ -36,10 +36,7 @@ class UserStore:
 
     def _save(self, users: dict) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(users, indent=1, sort_keys=True), encoding="utf-8")
-        os.chmod(tmp, 0o600)
-        tmp.replace(self.path)
+        atomic_write_text(self.path, json.dumps(users, indent=1, sort_keys=True), 0o600)
 
     # -- reads ------------------------------------------------------------------------------------------------
     def get(self, username: str) -> dict | None:

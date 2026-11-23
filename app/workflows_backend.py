@@ -31,7 +31,7 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
-from agentkit import (AgentRoute as _AgentRoute)
+from agentkit import (atomic_write_text, AgentRoute as _AgentRoute)
 
 # --- the agent's name --------------------------------------------------------------------------------------------
 # Text in this file says {{agent}} wherever it means the agent's name. It is filled in on the way out (JSON, errors,
@@ -286,9 +286,7 @@ async def set_interests(body: InterestsBody) -> dict:
         head, _ = _read_interests()
         path = _interests_path()
         path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(".tmp")
-        tmp.write_text(head + "\n" + "\n".join("- " + t for t in topics) + "\n", encoding="utf-8")
-        os.replace(tmp, path)
+        atomic_write_text(path, head + "\n" + "\n".join("- " + t for t in topics) + "\n")
     await asyncio.to_thread(write)
     return {"topics": topics}
 

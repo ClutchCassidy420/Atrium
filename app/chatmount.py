@@ -17,6 +17,8 @@ from urllib.parse import parse_qs, urlencode, urlsplit
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 
+from agentkit import atomic_write_text
+
 PREFIX = "/api/plugins/atrium-chat"
 CHAT_PREFIX = "atrium-chat-"
 SESSION_ID = re.compile(r"^[A-Za-z0-9_\-:.]{1,100}$")
@@ -61,20 +63,14 @@ class ChatOwners:
             if sid not in data:
                 data[sid] = user
                 self.path.parent.mkdir(parents=True, exist_ok=True)
-                tmp = self.path.with_suffix(".tmp")
-                tmp.write_text(json.dumps(data), encoding="utf-8")
-                os.chmod(tmp, 0o600)
-                tmp.replace(self.path)
+                atomic_write_text(self.path, json.dumps(data), 0o600)
             return True
 
     def forget(self, sid: str) -> None:
         with self.lock:
             data = self._load()
             if data.pop(sid, None) is not None:
-                tmp = self.path.with_suffix(".tmp")
-                tmp.write_text(json.dumps(data), encoding="utf-8")
-                os.chmod(tmp, 0o600)
-                tmp.replace(self.path)
+                atomic_write_text(self.path, json.dumps(data), 0o600)
 
 
 def mount_chat(app, cfg, hermes, current, same_origin) -> ChatOwners:

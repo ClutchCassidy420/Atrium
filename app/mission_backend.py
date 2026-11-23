@@ -51,7 +51,7 @@ from typing import Any, Literal, Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
-from agentkit import (AgentRoute as _AgentRoute, api_key as _api_key, call as _call, check_run_id as _check_run_id,
+from agentkit import (atomic_write_text, AgentRoute as _AgentRoute, api_key as _api_key, call as _call, check_run_id as _check_run_id,
                       dotenv_value as _dotenv_value, hermes_home as _hermes_home, RUN_ID_RE)
 
 # --- the agent's name --------------------------------------------------------------------------------------------
@@ -319,9 +319,7 @@ def _write_focus(items: list) -> None:
     else:
         new = "\n".join(lines[:start] + block + lines[end:])
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".tmp")          # written beside it and swapped in, so the file's own permissions do not matter
-    tmp.write_text(new.rstrip("\n") + "\n", encoding="utf-8")
-    os.replace(tmp, path)
+    atomic_write_text(path, new.rstrip("\n") + "\n")      # written beside it and swapped in, so the file's own permissions do not matter
 
 
 class FocusAdd(BaseModel):
@@ -485,9 +483,7 @@ def engine_state() -> dict:
 def _write_engine(st: dict) -> None:
     path = _engine_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(st), encoding="utf-8")
-    os.replace(tmp, path)
+    atomic_write_text(path, json.dumps(st))
 
 
 def engine_override() -> dict:
