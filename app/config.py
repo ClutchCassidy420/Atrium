@@ -92,6 +92,7 @@ class Config:
     mail_smtp_tls_server_name: str = ""
     mail_webmail_url: str = ""                 # optional: the full webmail, for an "Open webmail" link
     mail_accounts_key: str = ""                # Email: secret that encrypts people's saved mailbox logins (kept in the settings, not beside the data)
+    media_allow_private: bool = False         # Media: let owners connect a Jellyfin or Emby server on the local network (http, IP addresses, one-word names)
     mail_user_accounts: bool = False          # Email: let every signed-in person connect their own mailbox (an app password), not only the server-wide one
     kanban_workspaces_dir: str = ""            # where the agent's container keeps kanban card workspaces (default /opt/data/kanban/workspaces)
     deck_dir: str = ""                       # folder of status files written by this install's own jobs (monitors, system, weather...)
@@ -171,6 +172,7 @@ def load(env: dict | None = None) -> Config:
     cfg.mail_webmail_url = e.get("MAIL_WEBMAIL_URL", "")
     cfg.mail_user_accounts = e.get("MAIL_USER_ACCOUNTS", "").strip().lower() in ("1", "true", "yes", "on")
     cfg.mail_accounts_key = e.get("MAIL_ACCOUNTS_KEY", "").strip()
+    cfg.media_allow_private = e.get("MEDIA_ALLOW_PRIVATE", "").strip().lower() in ("1", "true", "yes", "on")
     if cfg.mail_accounts_key and len(cfg.mail_accounts_key) < 32:
         raise ValueError("MAIL_ACCOUNTS_KEY must be at least 32 characters.")
     sysf = cfg.instance_dir / "systems.json"

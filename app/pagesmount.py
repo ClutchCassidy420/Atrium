@@ -115,6 +115,11 @@ def mount_owner_pages(app, cfg, hermes, current, same_origin) -> None:
     if nextcloud_backend.configure(cfg):                 # Files and Calendar exist only when a Nextcloud is configured
         app.include_router(nextcloud_backend.router, prefix="/api/nextcloud", dependencies=[Depends(guard)])
     ctx = SimpleNamespace(guard=guard, hermes=hermes, current=current, same_origin=same_origin, mail_backend=None, server_mail=False)
+    import media_backend, media_servers
+    from users import UserStore as _Users
+    media_store = media_servers.Servers(cfg.data_dir, cfg.mail_accounts_key)
+    media_store.purge([u["username"] for u in _Users(cfg.data_dir / "users.json").all()])
+    app.include_router(media_backend.media_router(cfg, current, same_origin, media_store), prefix="/api/media")    # for everyone who may use the app: each person's own servers
     extension_hooks.call("mount_pages", app, cfg, ctx)   # a private layer mounts its own owner-only routes here (app/extension_hooks.py)
     import mail_backend
     server_mail = mail_backend.configure(cfg)
