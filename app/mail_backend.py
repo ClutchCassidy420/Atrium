@@ -49,6 +49,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field, StrictStr, ValidationError
 
 import mail_accounts as ma
+import mail_images as mi
 
 router = APIRouter()
 CFG = None
@@ -63,6 +64,8 @@ LOG = logging.getLogger(__name__)
 # Per-person mailboxes (MAIL_USER_ACCOUNTS=1). The mount sets ACCOUNTS to the encrypted store and, for each request, ACCOUNT to the signed-in
 # person's checked settings and SERVER_OK to whether that person may use the server-wide mailbox (owners, when they have none of their own).
 ACCOUNTS = None
+SAFE = None          # the senders each person has chosen to always see images from (mail_images.SafeSenders)
+SIGNER = None        # signs the links the cleaned message uses for images it shows (mail_images.Signer)
 ACCOUNT: ContextVar = ContextVar("mail_account", default=None)
 SERVER_OK: ContextVar = ContextVar("mail_server_ok", default=True)
 
@@ -269,8 +272,9 @@ VOID = {"br", "hr", "img", "col"}
 
 
 class _Clean(HTMLParser):
-    def __init__(self):
+    def __init__(self, rewrite=None):
         super().__init__(convert_charrefs=True)
+        self.rewrite = rewrite            # None: remote images stay blocked; else a function that turns a web address into a link on this server
         self.out: list[str] = []
         self.skip = 0
         self.stack: list[str] = []
@@ -297,7 +301,11 @@ class _Clean(HTMLParser):
                 if not (vv.startswith(("http://", "https://", "mailto:", "cid:", "data:image/")) or (k == "href" and vv.startswith("#"))):
                     continue
                 if k == "src" and vv.startswith(("http://", "https://")):
-                    bits.append('data-blocked-src="%s"' % self._esc(v))       # remote images are not loaded
+                    link = self.rewrite(v) if self.rewrite else None
+                    if link:
+                        bits.append('src="%s"' % self._esc(link))             # shown through this server, never straight from the sender
+                    else:
+                        bits.append('data-blocked-src="%s"' % self._esc(v))   # remote images are not loaded
                     continue
             if k == "style" and re.search(r"expression|url\s*\(|@import|behavior|javascript", v, re.I):
                 continue
@@ -338,8 +346,8 @@ class _Clean(HTMLParser):
             self.out.append("</%s>" % self.stack.pop())
 
 
-def clean_html(html: str) -> str:
-    p = _Clean()
+def clean_html(html: str, rewrite=None) -> str:
+    p = _Clean(rewrite)
     try:
         p.feed(html[:MAX_BODY])
         p.close()
@@ -394,19 +402,34 @@ def _fetch_message(folder: str, uid: int, mark_seen: bool = True):
         return raw
 
 
-def _read(folder: str, uid: int) -> dict:
+def _sole_sender(msg) -> str:
+    """The one address a message says it is from, or "" when that is not clear. A trusted sender is matched on this, so a From line with
+    several addresses, or one a parser had to guess at (an address inside the display name), is never trusted."""
+    header = msg.get("From")
+    addresses = getattr(header, "addresses", ())
+    if header is None or len(addresses) != 1 or getattr(header, "defects", ()):
+        return ""
+    return (addresses[0].addr_spec or "").lower()
+
+
+def _read(folder: str, uid: int, user: str = "", images: bool = False) -> dict:
+    """One message, cleaned. Remote images stay blocked unless this person asked for them (images) or always allows this sender."""
     raw = _fetch_message(folder, uid)
     msg = email.message_from_bytes(raw, policy=policy.default)
     text, html, atts, inline = _walk(msg)
+    sender = _sole_sender(msg)
+    safe = bool(SAFE is not None and user and SAFE.has(user, sender))
+    show = bool(SIGNER is not None and user and (images or safe))
     cleaned = ""
     if html:
-        cleaned = clean_html(html)
+        cleaned = clean_html(html, (lambda url: mi.proxied(SIGNER, user, url)) if show else None)
         for cid, uri in inline.items():
             cleaned = cleaned.replace('src="cid:%s"' % cid, 'src="%s"' % uri)
     out = {"uid": uid, "folder": folder, "subject": _dec(msg.get("Subject")) or "(no subject)", "from": (_addr_list(msg.get("From")) or [{"name": "", "email": ""}])[0],
             "to": _addr_list(msg.get("To")), "cc": _addr_list(msg.get("Cc")), "reply_to": _addr_list(msg.get("Reply-To")), "date": _iso(msg.get("Date")),
             "message_id": str(msg.get("Message-ID") or ""), "references": str(msg.get("References") or ""),
-            "text": text[:MAX_BODY], "html": cleaned, "blocked_images": "data-blocked-src" in cleaned, "attachments": atts}
+            "text": text[:MAX_BODY], "html": cleaned, "blocked_images": "data-blocked-src" in cleaned, "images_shown": "/api/mail-image/" in cleaned,
+            "sender_email": sender, "safe_sender": safe, "attachments": atts}
     for hook in READ_HOOKS:
         try:
             out.update(hook(msg) or {})
@@ -492,9 +515,70 @@ async def messages(folder: str = "INBOX", page: int = 0, q: str = ""):
     return await asyncio.to_thread(_list_page, folder, max(0, min(page, 500)), q.strip())
 
 
+def _user_of(request) -> str:
+    who = getattr(getattr(request, "state", None), "who", None)
+    return who["user"] if who else ""
+
+
 @router.get("/messages/{uid}")
-async def message(uid: int, folder: str = "INBOX"):
-    return await asyncio.to_thread(_read, folder, uid)
+async def message(uid: int, request: Request = None, folder: str = "INBOX", images: int = 0):
+    return await asyncio.to_thread(_read, folder, uid, _user_of(request), bool(images))
+
+
+class SafeIn(BaseModel):
+    address: str = Field(..., max_length=320)
+
+
+@router.get("/safe-senders")
+async def safe_senders(request: Request):
+    user = _user_of(request)
+    if SAFE is None or not user:
+        raise HTTPException(status_code=404, detail="Not available.")
+    return {"senders": await asyncio.to_thread(SAFE.list, user), "max": mi.MAX_SAFE}
+
+
+@router.post("/safe-senders")
+async def add_safe_sender(body: SafeIn, request: Request):
+    user = _user_of(request)
+    if SAFE is None or not user:
+        raise HTTPException(status_code=404, detail="Not available.")
+    try:
+        await asyncio.to_thread(SAFE.add, user, body.address)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from None
+    return {"senders": await asyncio.to_thread(SAFE.list, user)}
+
+
+@router.delete("/safe-senders")
+async def remove_safe_sender(address: str, request: Request):
+    user = _user_of(request)
+    if SAFE is None or not user:
+        raise HTTPException(status_code=404, detail="Not available.")
+    await asyncio.to_thread(SAFE.remove, user, address)
+    return {"senders": await asyncio.to_thread(SAFE.list, user)}
+
+
+# The signed links a cleaned message uses for its images. Mounted without a session check on purpose: the page that shows the message is a
+# sandboxed frame that does not send the session cookie. The link itself proves the right (a signature naming the person and the address,
+# valid for an hour), so this is not an open proxy.
+image_router = APIRouter()
+_image_slots = None
+
+
+@image_router.get("/{token}")
+async def remote_image(token: str):
+    global _image_slots
+    claims = SIGNER.verify(token) if SIGNER is not None else None
+    if claims is None:
+        raise HTTPException(status_code=403, detail="That image link is not valid or has expired.")
+    if _image_slots is None:
+        _image_slots = asyncio.Semaphore(6)                # at most six images are fetched at once
+    async with _image_slots:
+        try:
+            kind, data = await asyncio.to_thread(mi.fetch, claims["u"])
+        except mi.ImageError as error:
+            raise HTTPException(status_code=error.status, detail=error.message) from None
+    return Response(content=data, media_type=kind, headers={"Cache-Control": "private, max-age=3600", "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer"})
 
 
 @router.get("/messages/{uid}/attachment/{n}")
