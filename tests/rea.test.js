@@ -91,6 +91,17 @@ function fake({ up = true } = {}) {
   assert.ok(calls.some(c => c[0] === "DELETE" && c[1] === "/api/rea/jobs/" + JID));
   assert.match(text(), /Nothing run yet/);
 
+  // "Video game" lines up the usual checks for the chosen file (only those this workbench offers)
+  const before = calls.filter(c => c[0] === "POST" && c[1] === "/api/rea/jobs").length;
+  select.value = "quick-game"; select.dispatchEvent(new w.Event("change", { bubbles: true }));
+  await settle();
+  assert.match(text(), /Assembly-CSharp\.dll/);
+  w.document.querySelector("form.rea-run").dispatchEvent(new w.Event("submit", { bubbles: true, cancelable: true }));
+  await settle(300);
+  const posts = calls.filter(c => c[0] === "POST" && c[1] === "/api/rea/jobs");
+  assert.equal(posts.length, before + 1);
+  assert.deepEqual(posts[posts.length - 1][2], { command: "pe-imports", file: FID, arg: "" });
+
   console.log("rea tests passed");
   process.exit(0);
 })().catch(e => { console.error(e); process.exit(1); });

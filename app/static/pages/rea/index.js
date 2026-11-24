@@ -10,6 +10,7 @@
   function errText(e) { var m = String((e && e.message) || e || "Something went wrong"), i = m.indexOf("{"); if (i >= 0) { try { var j = JSON.parse(m.slice(i)); if (j && typeof j.detail === "string") return j.detail; } catch (x) { /* plain */ } } return m.replace(/^\d+:\s*/, ""); }
   function size(n) { if (n === null || n === undefined) return ""; if (n < 1024) return n + " B"; if (n < 1048576) return (n / 1024).toFixed(0) + " KB"; if (n < 1073741824) return (n / 1048576).toFixed(1) + " MB"; return (n / 1073741824).toFixed(2) + " GB"; }
   function when(t) { var d = new Date(t * 1000); return isNaN(d) ? "" : d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); }
+  var GAME = "quick-game";
   var STATUS = { queued: "Waiting", running: "Running…", done: "Done", failed: "Failed" };
 
   /* A result shown as a tree of names, kinds and counts (the full result is the download). */
@@ -80,9 +81,20 @@
       xhr.onerror = function () { setProg(null); setErr("Could not upload " + file.name + "."); };
       xhr.send(file);
     }
+    function post(command, file, arg) { return SDK.fetchJSON(API + "/jobs", { method: "POST", headers: JSONH, body: JSON.stringify({ command: command, file: file, arg: arg }) }); }
     function run(ev) {
       ev.preventDefault(); setBusy(true); setErr("");
-      SDK.fetchJSON(API + "/jobs", { method: "POST", headers: JSONH, body: JSON.stringify({ command: form.command, file: form.file, arg: form.arg }) })
+      if (form.command === GAME) {
+        /* A video game: line up the usual read-only checks for the chosen file; they run one after another. */
+        var f2 = files.filter(function (x) { return x.id === form.file; })[0], name = f2 ? f2.name : "", have = {};
+        (commands || []).forEach(function (x) { have[x.id] = true; });
+        var steps = (/^Assembly-.*\.dll$/i.test(name) ? ["managed", "managed-members"] : ["pe-imports", "pe-certs", "ghidra"]).filter(function (id) { return have[id]; });
+        var first = "";
+        steps.reduce(function (p, id) { return p.then(function () { return post(id, form.file, "").then(function (r) { if (!first) first = r.job.id; }); }); }, Promise.resolve())
+          .then(function () { setBusy(false); if (first) setOpenJob(first); return loadJobs(); }, function (x) { setBusy(false); setErr(errText(x)); return loadJobs(); });
+        return;
+      }
+      post(form.command, form.file, form.arg)
         .then(function (r) { setBusy(false); setOpenJob(r.job.id); return loadJobs(); }, function (x) { setBusy(false); setErr(errText(x)); });
     }
     function removeFile(f2) { if (window.confirm("Delete " + f2.name + " from the workbench?")) SDK.fetchJSON(API + "/files/" + f2.id, { method: "DELETE" }).then(function () { if (form.file === f2.id) set("file", ""); loadFiles(); }, function (x) { setErr(errText(x)); }); }
@@ -90,7 +102,7 @@
 
     if (!up) return h("div", { className: "rea" }, h("h1", null, "REA"), h(K.Alert, { tone: "warning", title: "The REA workbench is not running" }, "Ask whoever runs this server to start it (see rea-sidecar/ in the Atrium files)."));
     if (!commands) return h("div", { className: "rea" }, h(K.Loading, { label: "Loading…" }));
-    var chosen = commands.filter(function (x) { return x.id === form.command; })[0];
+    var chosen = form.command === GAME ? { id: GAME, target: "file", arg_label: "", arg_optional: true, help: "Upload the game's main program (the .exe), or for a Unity game its Assembly-CSharp.dll (in the _Data/Managed folder), not the whole install. This lines up the usual checks one after another: the libraries it uses, its signature and a Ghidra overview, or for Assembly-CSharp.dll the readable .NET overview and a list of its types and methods. The results appear under Results as each finishes." } : commands.filter(function (x) { return x.id === form.command; })[0];
     var groups = [];
     commands.forEach(function (x) { var gr = groups.filter(function (y) { return y.name === x.group; })[0]; if (!gr) { gr = { name: x.group, items: [] }; groups.push(gr); } gr.items.push(x); });
     var needsFile = chosen && chosen.target !== "none";
@@ -109,7 +121,7 @@
           })), !files.length && !prog ? h("p", { className: "hm-fine" }, "Nothing uploaded yet.") : null),
         h("form", { className: "hm-card rea-run", onSubmit: run }, h("h2", null, "2. Analyze"),
           h(K.Field, { label: "What to find out" }, function (ip) {
-            return h("select", Object.assign({}, ip, { className: "hm-select", value: form.command, onChange: function (x) { set("command", x.target.value); } }), h("option", { value: "" }, "Choose…"),
+            return h("select", Object.assign({}, ip, { className: "hm-select", value: form.command, onChange: function (x) { set("command", x.target.value); } }), h("option", { value: "" }, "Choose…"), h("option", { value: GAME }, "🎮 Video game (runs the usual checks)"),
               groups.map(function (gr) { return h("optgroup", { key: gr.name, label: gr.name }, gr.items.map(function (x) { return h("option", { key: x.id, value: x.id }, x.label); })); }));
           }),
           chosen ? h("p", { className: "hm-fine" }, chosen.help) : null,
