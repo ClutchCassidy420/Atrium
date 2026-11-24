@@ -194,7 +194,7 @@ async def note(path: str) -> dict:
         rel = target.relative_to(root).as_posix()
         titles = {n["id"]: n["title"] for n in notes}
         return {"id": rel, "title": titles.get(rel, Path(rel).stem), "mtime": mtime, "body": text[:BODY_CHARS], "cut": len(text) > BODY_CHARS,
-                "editable": len(text) <= BODY_CHARS and _can_write(target) and _can_write_dir(target.parent),
+                "editable": len(text) <= BODY_CHARS and _can_write_dir(target.parent),
                 "links": [{"id": t, "title": titles.get(t, t)} for t in sorted(links.get(rel, set()))],
                 "backlinks": [{"id": s, "title": titles.get(s, s)} for s, ts in links.items() if rel in ts]}
     return await asyncio.to_thread(read)
@@ -225,8 +225,12 @@ _NAME_OK = re.compile(r'^[^\x00-\x1f\\:*?"<>|]{1,120}$')
 READ_ONLY = "That folder is read-only on this install, so notes in it cannot be changed. Ask whoever runs the server to mount it writable."
 
 
-def _can_write(p: Path) -> bool:
-    return p.exists() and os.access(p, os.W_OK)
+def _keep_agent_access(target: Path, old_mode: Optional[int]) -> None:
+    """Saving replaces the file, so the new file belongs to the app. Keep it readable and writable by the folder's group (the agent's), as before."""
+    try:
+        os.chmod(target, ((old_mode if old_mode is not None else 0o664) | 0o060) & 0o777)
+    except OSError:
+        pass
 
 
 def _can_write_dir(p: Path) -> bool:
@@ -297,10 +301,12 @@ async def save_note(b: NoteBody) -> dict:
             raise HTTPException(status_code=404, detail="That note no longer exists.")
         if exists and not target.is_file():
             raise HTTPException(status_code=400, detail="That path is not a note.")
-        if not _can_write_dir(_nearest_dir(target.parent, root)) or (exists and not _can_write(target)):
+        if not _can_write_dir(_nearest_dir(target.parent, root)):       # replacing a file needs the folder to be writable, not the file
             raise HTTPException(status_code=403, detail=READ_ONLY)
+        old_mode = target.stat().st_mode if exists else None
         target.parent.mkdir(parents=True, exist_ok=True)
         atomic_write_text(target, b.body)
+        _keep_agent_access(target, old_mode)
         return {"id": rel, "mtime": int(target.stat().st_mtime)}
     return await asyncio.to_thread(write)
 
