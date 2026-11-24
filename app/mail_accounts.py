@@ -1,8 +1,9 @@
 """Per-person mailboxes for the Email pages (switched on with MAIL_USER_ACCOUNTS=1).
 
 Each person connects their own mailbox with an address and an app password. The password is encrypted on disk (AES-GCM, bound to the
-person and the address) with a key kept beside it in the data folder (mode 600), is never sent back to the browser, and is removed with
-the account. Mail servers are reached over verified implicit TLS only (IMAP 993, SMTP 465), the same as the server-wide mailbox.
+person and the address), is never sent back to the browser, and is removed with the account. The key comes from MAIL_ACCOUNTS_KEY in the
+server's private settings when that is set (best: a copy of the data folder alone then opens nothing). Otherwise a key file is made in the
+data folder (mode 600), which protects only against the saved file leaking on its own. Mail servers are reached over verified implicit TLS only (IMAP 993, SMTP 465), the same as the server-wide mailbox.
 
 Because a person types the mail server's name, Atrium must never be turned into a way to probe its own network. So a host must be a public
 DNS name (no IP addresses, no one-word or internal names), it is resolved at connect time, every address it resolves to must be a public
@@ -51,6 +52,18 @@ _INTERNAL_SUFFIXES = {"local", "localhost", "internal", "lan", "home", "corp", "
 _ADDRESS = re.compile(r"^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]{1,64}@(?=.{4,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$")
 
 
+MIN_KEY_CHARS = 32
+
+
+def derive_key(secret: str) -> bytes:
+    """A 32-byte AES key from the MAIL_ACCOUNTS_KEY setting."""
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+    if not isinstance(secret, str) or len(secret) < MIN_KEY_CHARS:
+        raise AccountError("MAIL_ACCOUNTS_KEY must be at least %d characters." % MIN_KEY_CHARS)
+    return HKDF(algorithm=hashes.SHA256(), length=32, salt=b"atrium-mail-accounts-v1", info=b"aes-gcm key").derive(secret.encode("utf-8"))
+
+
 class AccountError(Exception):
     """A problem the person can fix; the message is safe to show."""
 
@@ -96,14 +109,17 @@ def resolve_public(host: str, port: int = IMAP_PORT) -> str:
 class Accounts:
     """The encrypted store: <data>/mail-accounts.json, keyed by user name."""
 
-    def __init__(self, data_dir: Path):
+    def __init__(self, data_dir: Path, key: str = ""):
         self.path = Path(data_dir) / "mail-accounts.json"
         self.keyfile = Path(data_dir) / "mail-accounts.key"
+        self._env_key = derive_key(key) if key else None
         self._lock = threading.Lock()
         self._attempts: dict[str, list[float]] = {}
 
     # -- key and file ----------------------------------------------------------------------------------------------
     def _key(self) -> bytes:
+        if self._env_key is not None:
+            return self._env_key
         try:
             key = self.keyfile.read_bytes()
             if len(key) == 32:
@@ -131,15 +147,51 @@ class Accounts:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         atomic_write_text(self.path, json.dumps(data, indent=1, sort_keys=True), mode=0o600)
 
-    def _seal(self, user: str, address: str, password: str) -> str:
+    def _seal(self, user: str, address: str, password: str, key: Optional[bytes] = None) -> str:
         from cryptography.hazmat.primitives.ciphers.aead import AESGCM
         nonce = secrets.token_bytes(12)
-        return base64.b64encode(nonce + AESGCM(self._key()).encrypt(nonce, password.encode("utf-8"), (user + "\0" + address).encode("utf-8"))).decode()
+        return base64.b64encode(nonce + AESGCM(key or self._key()).encrypt(nonce, password.encode("utf-8"), (user + "\0" + address).encode("utf-8"))).decode()
 
-    def _open(self, user: str, address: str, sealed: str) -> str:
+    def _open(self, user: str, address: str, sealed: str, key: Optional[bytes] = None) -> str:
         from cryptography.hazmat.primitives.ciphers.aead import AESGCM
         raw = base64.b64decode(sealed)
-        return AESGCM(self._key()).decrypt(raw[:12], raw[12:], (user + "\0" + address).encode("utf-8")).decode("utf-8")
+        return AESGCM(key or self._key()).decrypt(raw[:12], raw[12:], (user + "\0" + address).encode("utf-8")).decode("utf-8")
+
+    def migrate(self) -> int:
+        """With a key from the settings, re-seal logins saved under the old key file, then destroy that file (best effort: overwritten, then
+        removed). If any saved login cannot be opened with the old key, nothing is changed and the key file is kept. Returns how many were moved."""
+        if self._env_key is None:
+            return 0
+        try:
+            old = self.keyfile.read_bytes()
+        except FileNotFoundError:
+            return 0
+        if len(old) != 32:
+            return 0
+        with self._lock:
+            data = self._load()
+            moved = {}
+            for user, rec in data.items():
+                try:
+                    moved[user] = self._seal(user, rec["address"], self._open(user, rec["address"], rec["sealed"], old), self._env_key)
+                except Exception:
+                    return 0
+            for user, sealed in moved.items():
+                data[user]["sealed"] = sealed
+            if moved:
+                self._save(data)
+        try:
+            with open(self.keyfile, "r+b") as fh:
+                fh.write(b"\0" * 32)
+                fh.flush()
+                os.fsync(fh.fileno())
+        except OSError:
+            pass
+        try:
+            self.keyfile.unlink()
+        except OSError:
+            pass
+        return len(moved)
 
     # -- the accounts ----------------------------------------------------------------------------------------------
     def info(self, user: str) -> Optional[dict]:
