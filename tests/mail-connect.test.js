@@ -6,7 +6,12 @@ const { JSDOM } = require("jsdom");
 
 const ROOT = path.join(__dirname, "../app/static");
 const settle = (ms = 100) => new Promise(resolve => setTimeout(resolve, ms));
-const PRESETS = [{ id: "gmail", label: "Gmail", hint: "Create an App password in your Google Account." }, { id: "fastmail", label: "Fastmail", hint: "Use an app password." }];
+const PRESETS = [
+  { id: "gmail", label: "Gmail", hint: "Create an App password in your Google Account.", help_url: "https://myaccount.google.com/apppasswords",
+    steps: ["Turn on 2-Step Verification in your Google Account.", "Create an app password and name it Atrium.", "Paste the 16 characters here (spaces are fine)."] },
+  { id: "fastmail", label: "Fastmail", hint: "Use an app password.", help_url: "https://app.fastmail.com/settings/security/devicekeys", steps: ["Open Password & Security in Fastmail and sign in.", "Create an app password named Atrium.", "Paste it here."] }];
+const GET_ONE = /Don't have an app password\? Get one/;
+const links = w => [...w.document.querySelectorAll("a")].filter(a => GET_ONE.test(a.textContent));
 
 async function open(handler) {
   const dom = new JSDOM('<main id="root"></main>', { url: "https://app.test/email/inbox", runScripts: "outside-only", pretendToBeVisual: true });
@@ -49,7 +54,7 @@ function fake({ server = false } = {}) {
       return { connected: true, account: c.kind, active, accounts: choices, address: c.address, webmail: "", features: c.kind === "server" ? ["blocklist"] : [], user_accounts: true, max_accounts: 5, presets: PRESETS };
     }
     if (pathPart === "/api/mail/account" && o.method === "PUT") {
-      if (fail) throw new Error('502: {"detail":"The mail server did not accept the sign-in."}');
+      if (fail) throw new Error('502: {"detail":"' + (typeof fail === "string" ? fail : "The mail server did not accept the sign-in.") + '"}');
       const body = JSON.parse(o.body);
       const a = { id: "m" + nextId++, address: body.address };
       mine.push(a);
@@ -71,15 +76,31 @@ function fake({ server = false } = {}) {
 
   // nobody connected yet: the form, with the provider's hint and no server fields; no Cancel on the first one
   assert.match(text(), /Connect your email/);
-  assert.match(text(), /Create an App password in your Google Account/);
   assert.ok(!/Incoming server/.test(text()) && !btn(w, /^Cancel$/));
   assert.equal($("input[type=password]").autocomplete, "off");
+
+  // under the app password: a link to where the chosen provider makes one (a new tab, no opener), and its steps
+  assert.equal(links(w).length, 1);
+  assert.equal(links(w)[0].getAttribute("href"), "https://myaccount.google.com/apppasswords");
+  assert.equal(links(w)[0].getAttribute("target"), "_blank");
+  assert.equal(links(w)[0].getAttribute("rel"), "noopener noreferrer");
+  assert.deepEqual([...w.document.querySelectorAll(".ml-help li")].map(li => li.textContent), PRESETS[0].steps);
+  setValue(w, $("select"), "fastmail");
+  await settle(40);
+  assert.equal(links(w)[0].getAttribute("href"), "https://app.fastmail.com/settings/security/devicekeys");
+  assert.match($(".ml-help").textContent, /Open Password & Security in Fastmail/);
+  assert.ok(!/Turn on 2-Step Verification/.test(text()));
+
+  // "Other" has no page to point to: no link and no steps, but the two server fields
   setValue(w, $("select"), "");
   await settle(40);
+  assert.equal(links(w).length, 0);
+  assert.ok(!$(".ml-help"));
   assert.match(text(), /Incoming server \(IMAP\)/);
   assert.match(text(), /Outgoing server \(SMTP\)/);
   setValue(w, $("select"), "gmail");
   await settle(40);
+  assert.equal(links(w).length, 1);
 
   // a refused sign-in shows the reason and keeps the form
   state.setFail(true);
@@ -89,6 +110,17 @@ function fake({ server = false } = {}) {
   await settle(120);
   assert.match(text(), /did not accept the sign-in/);
   assert.match(text(), /Connect your email/);
+  assert.equal(links(w).length, 1, "an ordinary failure does not add a second link");
+
+  // a normal password refused by the provider: the clear message, with the same link beside it, and the password is never shown back
+  state.setFail("That provider needs an app password, not your normal password.");
+  submit(w);
+  await settle(120);
+  assert.match($('[role="alert"]').textContent, /That provider needs an app password, not your normal password\./);
+  assert.equal(links(w).length, 2, "the link is repeated next to the message");
+  assert.ok([...$('[role="alert"]').querySelectorAll("a")].some(a => a.getAttribute("href") === "https://myaccount.google.com/apppasswords"));
+  assert.ok(!text().includes("app-pass-123"), "the password is not echoed anywhere on the page");
+  assert.ok([...w.document.querySelectorAll("input")].every(i => i.value !== "app-pass-123" || i.type === "password"));
   assert.deepEqual(calls.find(c => c[0] === "PUT").slice(1), ["/api/mail/account", { address: "bob@gmail.com", password: "app-pass-123", preset: "gmail" }]);
 
   // a good one opens the mailbox, which says whose it is, and offers Add another and Disconnect

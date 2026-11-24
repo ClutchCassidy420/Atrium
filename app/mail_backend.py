@@ -446,6 +446,11 @@ class SendIn(BaseModel):
     reply_folder: str = Field("", max_length=200)
 
 
+def _presets() -> list:
+    """The providers a person can pick when they connect a mailbox: what the form shows, never the server addresses."""
+    return [{"id": p["id"], "label": p["label"], "hint": p["hint"], "help_url": p["help_url"], "steps": p["steps"]} for p in ma.PRESETS]
+
+
 @router.get("/status")
 async def status(request: Request = None):        # the default keeps an install's own tests that call status() directly working
     own = ACCOUNT.get()
@@ -457,12 +462,12 @@ async def status(request: Request = None):        # the default keeps an install
     choices = ([{"id": "server", "address": CFG.mail_address, "kind": "server"}] if server_ok else []) +         [{"id": a["id"], "address": a["address"], "kind": "personal"} for a in mine]
     if own is None and not server_ok:                                          # signed in, but no mailbox to work on
         return {"connected": False, "account": None, "accounts": choices, "user_accounts": ACCOUNTS is not None, "features": [],
-                "presets": [{"id": p["id"], "label": p["label"], "hint": p["hint"]} for p in ma.PRESETS]}
+                "presets": _presets()}
     c = own or CFG
     return {"connected": True, "account": "personal" if own is not None else "server", "active": getattr(own, "account_id", "") if own is not None else "server",
             "accounts": choices, "address": c.mail_address, "webmail": c.mail_webmail_url,
             "features": sorted(FEATURES) if own is None else [], "user_accounts": ACCOUNTS is not None, "max_accounts": ma.MAX_ACCOUNTS,
-            "presets": [{"id": p["id"], "label": p["label"], "hint": p["hint"]} for p in ma.PRESETS]}
+            "presets": _presets()}
 
 
 @router.get("/folders")
@@ -705,17 +710,37 @@ def _me(request: Request) -> str:
 
 def _test_login(c) -> None:
     """Sign in to the incoming and the outgoing server once, so a wrong password or host is found before anything is saved."""
-    token = ACCOUNT.set(c)
+    # A refused sign-in is told apart from a server that cannot be reached, because the fix is different: a provider from the list nearly always
+    # refuses because a normal password was used. The messages never contain anything the person typed.
+    refused = ("That provider needs an app password, not your normal password." if getattr(c, "preset", "")
+               else "The mail server did not accept the sign-in. Check the address and the password.")
+    unreachable = "Could not reach the mail server securely. Check the server names and try again."
     try:
-        with _imap():
-            pass
+        m = _VerifiedIMAP4SSL(c.mail_imap_host, c.mail_imap_port, c.mail_imap_tls_server_name, timeout=25)
+    except (OSError, ValueError, imaplib.IMAP4.error):
+        raise HTTPException(status_code=502, detail=unreachable) from None
+    try:
+        m.login(c.mail_address, c.mail_token)
+    except imaplib.IMAP4.error:
+        raise HTTPException(status_code=502, detail=refused) from None
+    except (OSError, ValueError):
+        raise HTTPException(status_code=502, detail=unreachable) from None
     finally:
-        ACCOUNT.reset(token)
+        try:
+            m.logout()
+        except Exception:
+            pass
     try:
         with _VerifiedSMTPSSL(c.mail_smtp_host, c.mail_smtp_port, c.mail_smtp_tls_server_name) as s:
             s.login(c.mail_address, c.mail_token)
-    except (smtplib.SMTPException, ssl.SSLError, OSError, ValueError):
+    except smtplib.SMTPAuthenticationError:
+        raise HTTPException(status_code=502, detail=refused) from None
+    except (smtplib.SMTPConnectError, smtplib.SMTPServerDisconnected):
+        raise HTTPException(status_code=502, detail=unreachable) from None
+    except smtplib.SMTPException:                         # (checked before OSError, which SMTPException is a kind of)
         raise HTTPException(status_code=502, detail="The outgoing mail server did not accept the sign-in.") from None
+    except (ssl.SSLError, OSError, ValueError):
+        raise HTTPException(status_code=502, detail=unreachable) from None
 
 
 @router.get("/account")

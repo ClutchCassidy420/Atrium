@@ -203,6 +203,8 @@
     var b = useState(false), busy = b[0], setBusy = b[1], e = useState(""), err = e[0], setErr = e[1];
     function set(k, v) { var n = Object.assign({}, f); n[k] = v; setF(n); }
     var chosen = presets.filter(function (p) { return p.id === f.preset; })[0];
+    // the provider's own page where an app password is made; not offered for "Other", which has no page to point to
+    var helpLink = chosen && chosen.help_url ? h("a", { className: "hm-btn hm-btn-ghost", href: chosen.help_url, target: "_blank", rel: "noopener noreferrer", style: { alignSelf: "flex-start" } }, "Don't have an app password? Get one") : null;
     function submit(ev) {
       ev.preventDefault();
       setBusy(true); setErr("");
@@ -215,14 +217,17 @@
       h("form", { className: "hm-card", onSubmit: submit, style: { maxWidth: "34rem", display: "flex", flexDirection: "column", gap: ".8rem" } },
         h("h2", null, props.adding ? "Add another mailbox" : "Connect your email"),
         h("p", { className: "hm-sub" }, "Read and send from your own mailbox here. Your password is stored encrypted on this server and is never shown again."),
-        err ? h(K.Alert, { tone: "danger" }, err) : null,
+        err ? h(K.Alert, { tone: "danger", action: /needs an app password/.test(err) ? helpLink : null }, err) : null,
         h(K.Field, { label: "Provider" }, function (ip) {
           return h("select", Object.assign({}, ip, { className: "hm-select", value: f.preset, onChange: function (x) { set("preset", x.target.value); } }),
             presets.map(function (p) { return h("option", { key: p.id, value: p.id }, p.label); }), h("option", { key: "", value: "" }, "Other (enter the servers)"));
         }),
-        chosen ? h("p", { className: "hm-fine" }, chosen.hint) : null,
         h(K.Field, { label: "Email address", required: true }, function (ip) { return h("input", Object.assign({}, ip, { className: "hm-input", type: "email", autoComplete: "email", maxLength: 320, required: true, value: f.address, onChange: function (x) { set("address", x.target.value); } })); }),
         h(K.Field, { label: "App password", required: true, hint: "Use an app password, not your normal password." }, function (ip) { return h("input", Object.assign({}, ip, { className: "hm-input", type: "password", autoComplete: "off", maxLength: 512, required: true, value: f.password, onChange: function (x) { set("password", x.target.value); } })); }),
+        chosen ? h("div", { className: "ml-help", style: { display: "flex", flexWrap: "wrap", gap: ".6rem 1.2rem", alignItems: "flex-start" } },
+          helpLink,
+          chosen.steps && chosen.steps.length ? h("ol", { className: "hm-fine", style: { margin: 0, paddingLeft: "1.2rem", flex: "1 1 14rem" } }, chosen.steps.map(function (s, i) { return h("li", { key: i }, s); }))
+            : chosen.hint ? h("p", { className: "hm-fine", style: { margin: 0, flex: "1 1 14rem" } }, chosen.hint) : null) : null,
         !f.preset ? h(SDK.React.Fragment, null,
           h(K.Field, { label: "Incoming server (IMAP)", required: true, hint: "A public name such as imap.example.com. Port 993 with TLS is used." }, function (ip) { return h("input", Object.assign({}, ip, { className: "hm-input", type: "text", maxLength: 253, required: true, value: f.imap_host, onChange: function (x) { set("imap_host", x.target.value); } })); }),
           h(K.Field, { label: "Outgoing server (SMTP)", required: true, hint: "A public name such as smtp.example.com. Port 465 with TLS is used." }, function (ip) { return h("input", Object.assign({}, ip, { className: "hm-input", type: "text", maxLength: 253, required: true, value: f.smtp_host, onChange: function (x) { set("smtp_host", x.target.value); } })); })) : null,
