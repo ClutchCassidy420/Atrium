@@ -325,8 +325,12 @@
       h("h4", { className: "ats-row-t" }, entry.name),
       entry.description && h("p", { className: "ats-note" }, entry.description),
       entry.host && h("p", { className: "ats-note" }, entry.host),
-      entry.installed || props.installed ? h("div", { className: "ats-note" }, "Installed") :
+      entry.installed || props.installed ? h("div", { className: "ats-actions ats-wrap" }, h("span", { className: "ats-note" }, "Installed"),
+        entry.oauth && h("button", { type: "button", className: "ats-btn", disabled: props.disabled, onClick: function () { props.signIn(entry.name); } }, "Sign in again")) :
         entry.blocked ? h("div", { className: "ats-note" }, entry.blocked) :
+          entry.oauth ? h("div", null,
+            h("p", { className: "ats-note" }, "You sign in on " + entry.name + "'s own page, in a new tab. Atrium never sees your password or token."),
+            h("button", { type: "button", className: "ats-btn", disabled: props.disabled, onClick: function () { props.signIn(entry.name); } }, "Sign in")) :
           h("form", { onSubmit: submit },
             entry.fields.map(function (field) {
               return h("label", { key: field.name, className: "ats-connection-field" }, field.label,
@@ -377,6 +381,43 @@
     function connect(name, env) {
       return run(name, "/connect", "POST", { env: env }, name + " connected. Test it, then start a fresh chat to use its tools.");
     }
+
+    // Signing in with OAuth: Hermes runs the exchange; Atrium opens the provider's page and watches the flow until it ends.
+    var flowState = useState(null), flow = flowState[0], setFlow = flowState[1];
+    var flowId = flow && flow.flow_id, flowStatus = flow && flow.status;
+    useEffect(function () {
+      if (!flowId || (flowStatus !== "authorization_required" && flowStatus !== "starting")) return undefined;
+      var ticks = 0, name = flow.name, timer = setInterval(function () {
+        ticks += 1;
+        if (ticks > 480) { clearInterval(timer); setFlow({ name: name, status: "expired", error: "That sign-in took too long. Start it again." }); return; }
+        fetchJSON(base + "/oauth/flows/" + encodeURIComponent(flowId)).then(function (data) {
+          if (data.status === "approved") {
+            setFlow(null);
+            setMessage(name + " connected. Start a fresh chat to use its tools.");
+            setResult({ name: name, tools: data.tools || [] });
+            refresh();
+          } else if (data.status !== flowStatus || data.status === "error") {
+            setFlow(Object.assign({ name: name }, data));
+          }
+        }, function (error) { clearInterval(timer); setFlow({ name: name, status: "error", error: errText(error) }); });
+      }, 2000);
+      return function () { clearInterval(timer); };
+    }, [flowId, flowStatus]);
+    function signIn(name) {
+      setMessage("");
+      setResult(null);
+      setFlow({ name: name, status: "starting" });
+      fetchJSON(base + "/" + encodeURIComponent(name) + "/oauth/start", { method: "POST" }).then(function (data) {
+        setFlow(Object.assign({ name: name }, data));
+        if (data.authorization_url) { try { window.open(data.authorization_url, "_blank", "noopener,noreferrer"); } catch (x) { /* the link below still works */ } }
+        refresh();
+      }, function (error) { setFlow({ name: name, status: "error", error: errText(error) }); });
+    }
+    function cancelSignIn() {
+      var id = flow && flow.flow_id;
+      setFlow(null);
+      if (id) fetchJSON(base + "/oauth/flows/" + encodeURIComponent(id), { method: "DELETE" }).catch(function () { /* it expires by itself */ });
+    }
     var installedNames = new Set(installed && installed.rows ? installed.rows.map(function (server) { return server.name; }) : []);
     var matching = catalog && catalog.rows && catalog.rows.filter(function (entry) {
       return (entry.name + " " + entry.description).toLowerCase().includes(filter.trim().toLowerCase());
@@ -384,6 +425,17 @@
 
     return h(SDK.React.Fragment, null,
       h("div", { role: "status", className: "ats-note" }, busy ? "Working…" : message),
+      flow && h("div", { className: "ats-card", role: "status" },
+        h("h3", { className: "ats-h" }, "Signing in to " + flow.name),
+        flow.status === "starting" && h(window.__APP_UI__.kit.Loading, { label: "Asking Hermes to start the sign-in…" }),
+        flow.status === "authorization_required" && h(SDK.React.Fragment, null,
+          h("p", { className: "ats-note" }, "Approve the access on " + flow.name + "'s page. It should have opened in a new tab; if it did not, use the link."),
+          flow.authorization_url && h("p", null, h("a", { href: flow.authorization_url, target: "_blank", rel: "noopener noreferrer", className: "ats-btn" }, "Open the sign-in page")),
+          h(window.__APP_UI__.kit.Loading, { label: "Waiting for you to approve…" })),
+        (flow.status === "error" || flow.status === "expired" || flow.status === "cancelled") &&
+          h("p", { role: "alert", className: "ats-note" }, flow.error || (flow.status === "cancelled" ? "The sign-in was cancelled." : "The sign-in did not finish. Try again.")),
+        h("button", { type: "button", className: "ats-btn", onClick: cancelSignIn },
+          flow.status === "starting" || flow.status === "authorization_required" ? "Cancel" : "Close")),
       h("div", { className: "ats-card" },
         h("h3", { className: "ats-h" }, "Installed connections"),
         h("p", { className: "ats-note" }, "Test a connection to see which tools its server offers."),
@@ -429,7 +481,7 @@
               !matching.length && h("p", { className: "ats-note" }, "No matching connections."),
               matching.map(function (entry) {
                 return h(ConnectCard, { key: entry.name, entry: entry, installed: installedNames.has(entry.name),
-                  disabled: busy || !installed || !!installed.error, connect: connect });
+                  disabled: busy || !installed || !!installed.error, connect: connect, signIn: signIn });
               }))));
   }
 

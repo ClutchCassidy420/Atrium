@@ -17,10 +17,11 @@ def mcp(make, cfg, tmp_path):
     installed = {}
     received = {}
     synthetic_key = uuid4().hex
+    flow = {"status": "authorization_required", "url": "https://provider.invalid/authorize?state=abc", "polls": 0, "cancelled": False, "started": 0}
 
     def entry(name, **overrides):
-        return dict(name=name, transport="http", url="https://fixture.invalid/mcp",
-                    needs_install=False, auth_type="none", installed=name in installed, **overrides)
+        return {**dict(name=name, transport="http", url="https://fixture.invalid/mcp",
+                       needs_install=False, auth_type="none", installed=name in installed), **overrides}
 
     class Dashboard(Fake):
         def do_GET(self):
@@ -34,9 +35,20 @@ def mcp(make, cfg, tmp_path):
                 return self.reply(200, {"entries": [
                     entry("echo"), keyed, entry("scripted", command="ignored"),
                     entry("templated", bootstrap=["ignored"]),
+                    entry("signin", auth_type="oauth"),
+                    entry("needsapp", auth_type="oauth", required_env=[{"name": "APP_ID", "required": True}]),
+                    entry("oauthcmd", auth_type="oauth", command="ignored"),
                 ]})
             if self.path == "/api/mcp/servers":
                 return self.reply(200, {"servers": list(installed.values())})
+            if self.path == "/api/mcp/oauth/flows/f1":
+                flow["polls"] += 1
+                done = flow["polls"] >= 2 and not flow["cancelled"]
+                status = "cancelled" if flow["cancelled"] else "approved" if done else flow["status"]
+                return self.reply(200, {"flow_id": "f1", "server_name": "signin", "status": status, "authorization_url": flow["url"],
+                                        "error": None, "tools": [{"name": "search", "description": synthetic_key}] if done else []})
+            if self.path.startswith("/api/mcp/oauth/flows/"):
+                return self.reply(404)
             return self.reply(404)
 
         def do_POST(self):
@@ -57,6 +69,12 @@ def mcp(make, cfg, tmp_path):
                 installed[name] = {"name": name, "enabled": body["enable"],
                                    "url": f"https://fixture.invalid/{synthetic_key}", "env": {"KEY": synthetic_key}}
                 return self.reply(200, {"ok": True})
+            if self.path == "/api/mcp/servers/signin/auth":
+                if "signin" not in installed:
+                    return self.reply(404)
+                flow["started"] += 1
+                return self.reply(200, {"flow_id": "f1", "server_name": "signin", "status": flow["status"],
+                                        "authorization_url": flow["url"], "error": None})
             if self.path == "/api/mcp/servers/echo/test":
                 return self.reply(200, {"ok": True, "tools": [{"name": "echo", "description": synthetic_key}]})
             if self.path == "/api/mcp/servers/legacy/test":
@@ -74,6 +92,9 @@ def mcp(make, cfg, tmp_path):
             return self.reply(404)
 
         def do_DELETE(self):
+            if self.path == "/api/mcp/oauth/flows/f1" and self.dash_ok():
+                flow["cancelled"] = True
+                return self.reply(200, {"ok": True, "status": "cancelled"})
             if self.path == "/api/mcp/servers/echo" and self.dash_ok():
                 del installed["echo"]
                 return self.reply(200, {"ok": True})
@@ -90,6 +111,7 @@ def mcp(make, cfg, tmp_path):
             (tmp_path / "hermes-home" / "atrium").mkdir(parents=True)
             client = make(hermes=Hermes(base, KEY, base, TOKEN, cfg.hermes_data_dir),
                           users=(("alice", "owner", PW), ("bob", "user", PW2)), config=cfg)
+            client.flow = flow
             yield client, installed, received, synthetic_key
         finally:
             server.shutdown()
@@ -146,3 +168,46 @@ def test_operation_missing_from_older_dashboard(mcp):
     response = client.post(API + "/legacy/test", headers=H)
     assert response.status_code == 501
     assert "unavailable" in response.json()["detail"]
+
+
+def test_oauth_entries_can_be_signed_in_from_atrium(mcp):
+    client, installed, received, synthetic_key = mcp
+    login(client)
+    entries = {e["name"]: e for e in client.get(API + "/catalog").json()["entries"]}
+    assert entries["signin"]["oauth"] is True and entries["signin"]["blocked"] == "" and entries["signin"]["fields"] == []
+    assert entries["echo"]["oauth"] is False and entries["keyed"]["oauth"] is False
+    assert entries["needsapp"]["oauth"] is False and "registered" in entries["needsapp"]["blocked"]       # needs a provider app first
+    assert entries["oauthcmd"]["oauth"] is False and entries["oauthcmd"]["blocked"]                          # setup only Hermes can do
+    assert client.post(API + "/signin/connect", headers=H, json={}).status_code == 400                       # no key form for OAuth
+    for name in ("needsapp", "oauthcmd", "echo", "nothere"):
+        assert client.post(f"{API}/{name}/oauth/start", headers=H).status_code in (400, 404), name
+    started = client.post(API + "/signin/oauth/start", headers=H)
+    assert started.status_code == 200
+    assert started.json() == {"flow_id": "f1", "status": "authorization_required", "authorization_url": "https://provider.invalid/authorize?state=abc",
+                              "error": None, "tools": []}
+    assert received["signin"] == {"name": "signin", "enable": True, "env": {}}                              # installed first, with no credentials
+    assert client.post(API + "/signin/oauth/start", headers=H).status_code == 200 and "signin" in installed   # a second try does not install twice
+    first = client.get(API + "/oauth/flows/f1").json()
+    assert first["status"] == "authorization_required"
+    done = client.get(API + "/oauth/flows/f1").json()
+    assert done["status"] == "approved" and done["tools"] == ["search"] and done["authorization_url"] is None
+    assert synthetic_key not in str(done)
+    assert client.delete(API + "/oauth/flows/f1", headers=H).json() == {"ok": True}
+    assert client.get(API + "/oauth/flows/f1").json()["status"] == "cancelled"
+
+
+def test_oauth_sign_in_is_owner_only_and_checks_what_hermes_returns(mcp):
+    client, installed, _, _ = mcp
+    assert client.post(API + "/signin/oauth/start", headers=H).status_code == 401
+    login(client, "bob", PW2)
+    assert client.post(API + "/signin/oauth/start", headers=H).status_code == 403
+    assert client.get(API + "/oauth/flows/f1").status_code == 403
+    login(client)
+    assert client.post(API + "/signin/oauth/start", headers={"origin": "https://other.test"}).status_code == 403
+    assert client.delete(API + "/oauth/flows/f1", headers={"origin": "https://other.test"}).status_code == 403
+    for bad in ("../x", "a b", "x" * 200):
+        assert client.get(API + "/oauth/flows/" + bad).status_code in (400, 404, 422), bad
+    for unsafe in ("http://provider.invalid/a", "javascript:alert(1)", "https://user:pw@provider.invalid/a", "https://provider.invalid/a\nb", 5):
+        client.flow["url"] = unsafe
+        assert client.post(API + "/signin/oauth/start", headers=H).json()["authorization_url"] is None, unsafe     # never handed to the browser
+    assert client.get(API + "/oauth/flows/unknown").status_code == 404 and "no longer running" in client.get(API + "/oauth/flows/unknown").json()["detail"]

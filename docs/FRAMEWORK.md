@@ -167,6 +167,10 @@ Jobs are reached through the Hermes dashboard's job routes (the `hermes` command
 dashboard token and nothing else for them. Editing the radar topics needs the vault's `Radar` folder to be writable and mounted writable;
 the rest of the vault stays read-only. A job's "last answer" is read from its output files when the app may open them, and otherwise from the final reply of the job's last run (through the dashboard).
 
+## Connections (external tools for the agent)
+
+Settings > Connections (owners only) lists Hermes's MCP catalog. Tools that need an API key take it in a form. Tools that sign in with OAuth show a **Sign in** button: Atrium asks Hermes to start the flow (`POST /api/mcp/servers/<name>/auth`, installing the entry first if needed), opens the provider's page in a new tab and watches the flow until Hermes reports it approved, then lists the tools. Hermes does the whole exchange and keeps the token; no code or token passes through Atrium, and Atrium only ever passes on an `https` sign-in address. The provider redirects the browser to Hermes's own callback (`<HERMES_DASHBOARD_PUBLIC_URL>/api/mcp/oauth/callback/<name>`), so that address must be reachable from the owner's browser. Entries that need an app registered with the provider first (they declare `required_env`), or that need local setup, stay blocked with a note. Needs a Hermes whose dashboard has the OAuth flow routes (v0.23 has them); older ones answer that the operation is unavailable.
+
 ## One design for everyone
 
 All colors, radius and fonts are CSS variables in `static/tokens.css`. Every page uses those variables and nothing else. An install may
