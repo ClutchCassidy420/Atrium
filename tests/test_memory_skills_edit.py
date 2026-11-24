@@ -129,3 +129,22 @@ def test_no_skills_folder_is_reported_not_an_error(make, cfg, tmp_path):
     j = c.get(SK + "/list").json()
     assert j == {"skills": [], "exists": False, "writable": False}
     assert c.post(SK + "/skill", json={"id": "tools/x", "body": SKILL, "create": True}, headers=H).status_code == 404
+
+
+@pytest.mark.skipif(os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0), reason="needs real file permissions")
+def test_a_file_that_is_not_writable_can_still_be_replaced_when_its_folder_is(owner):
+    note = owner.home / "obsidian-vault" / "Notes" / "Alpha.md"
+    skill = owner.home / "skills" / "research" / "summarize" / "SKILL.md"
+    note.chmod(0o644)
+    skill.chmod(0o644)
+    n = owner.get(MEM + "/note", params={"path": "Notes/Alpha.md"}).json()
+    assert n["editable"] is True
+    assert owner.post(MEM + "/note", json={"path": "Notes/Alpha.md", "body": "# Alpha\nEdited\n"}, headers=H).status_code == 200
+    assert "Edited" in note.read_text() and note.stat().st_mode & 0o060 == 0o060         # the agent's group can still edit it
+    s = [x for x in owner.get(SK + "/list").json()["skills"] if x["id"] == "research/summarize"][0]
+    assert s["writable"] is True
+    body = SKILL.replace("web-search", "summarize")
+    assert owner.post(SK + "/skill", json={"id": "research/summarize", "body": body}, headers=H).status_code == 200
+    assert skill.read_text() == body and skill.stat().st_mode & 0o060 == 0o060
+    assert owner.post(MEM + "/note", json={"path": "Notes/Fresh", "body": "x", "create": True}, headers=H).status_code == 200
+    assert (owner.home / "obsidian-vault" / "Notes" / "Fresh.md").stat().st_mode & 0o060 == 0o060

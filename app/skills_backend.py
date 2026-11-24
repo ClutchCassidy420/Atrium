@@ -111,7 +111,7 @@ def _scan() -> list[dict]:
         sid = rel.as_posix()
         out.append({"id": sid, "name": fields.get("name") or rel.parts[-1], "description": fields.get("description", ""),
                     "category": rel.parts[0] if len(rel.parts) > 1 else "", "mtime": int(st.st_mtime), "size": st.st_size,
-                    "writable": os.access(f, os.W_OK) and _writable_dir(Path(dirpath))})
+                    "writable": _writable_dir(Path(dirpath))})
         if len(out) >= MAX_SKILLS:
             break
     return out
@@ -138,7 +138,7 @@ async def get_skill(id: str) -> dict:
             text = f.read_text(encoding="utf-8", errors="ignore")
             others = sorted(p.name for p in d.iterdir() if p.name != "SKILL.md" and not p.name.startswith("."))[:50]
             return {"id": sid, "body": text, "files": others, "mtime": int(f.stat().st_mtime),
-                    "writable": os.access(f, os.W_OK) and _writable_dir(d)}
+                    "writable": _writable_dir(d)}
         except OSError:
             raise HTTPException(status_code=404, detail="Skill not found.") from None
     return await asyncio.to_thread(read)
@@ -171,10 +171,15 @@ async def save_skill(b: SkillBody) -> dict:
         anchor = d if d.exists() else d.parent
         while not anchor.exists() and anchor != root:
             anchor = anchor.parent
-        if not _writable_dir(anchor) or (exists and not os.access(f, os.W_OK)):
+        if not _writable_dir(anchor):                                  # replacing the file needs the folder to be writable, not the file
             raise HTTPException(status_code=403, detail=READ_ONLY)
+        old_mode = f.stat().st_mode if exists else None
         d.mkdir(parents=True, exist_ok=True)
         atomic_write_text(f, b.body)
+        try:                                                           # the new file belongs to the app; keep the agent's group able to edit it
+            os.chmod(f, ((old_mode if old_mode is not None else 0o664) | 0o060) & 0o777)
+        except OSError:
+            pass
         return {"id": sid, "mtime": int(f.stat().st_mtime)}
     return await asyncio.to_thread(write)
 
