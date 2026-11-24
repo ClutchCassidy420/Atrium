@@ -108,6 +108,11 @@ While the agent works, the icon for the tool it is really using glows: the magne
 
 An install can offer its own looks in Settings > Avatar with `[[avatar_presets]]` in `instance.toml`: each has a `name` (up to 40 characters) and a `look` table of plain values (text, numbers, true or false; up to 24 keys). A list that is not in that shape is ignored as a whole, never half used.
 
+### Chat: emoji reactions
+Every chat message has a small **☺+** button (always visible on touch screens, on hover elsewhere) that opens an emoji picker. Click an emoji to react, click your reaction again to take it back; reactions show as small counted chips under the message. They are stored per chat in `chat_reactions.json` in the data folder (`app/chat_reactions.py`, routes `/api/plugins/atrium-chat/reactions/{chat}`), are only visible to people who may open that chat, and go when the chat is deleted. A message holds at most 8 different emojis.
+
+The agent can react too. It writes `[[react: 👍]]` (one to three emojis) anywhere in a reply; the page hides the marker and shows the emoji as a dashed chip on the person's message just before. Nothing extra is stored, because the marker stays in the transcript. The agent only does this if its instructions say so, for example: "You may react to a message with an emoji by putting [[react: 👍]] in your reply. Do it when a reaction says more than words, not every time." Put that line in the install's own agent instructions (it belongs to the instance, not the framework).
+
 ### Chat: approvals and read-aloud
 
 When the agent needs a yes, the chat shows one approval card per request (`static/pages/chat/approval.js`). It shows the **full** command, never a cut-down one; offers "Approve once" only when there is a command to approve, and "Deny" whenever the request can be answered; shows a request that has no id, or is a question and not an approval, without buttons (it cannot be answered from the card); and sends one answer per click. The answer goes to the run the card was shown for and is refused if that run is no longer the current one, so a stale card cannot approve something in a later run. A failure is shown and the buttons work again.

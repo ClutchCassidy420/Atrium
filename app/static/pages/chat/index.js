@@ -667,14 +667,45 @@
       st.status === "blocked" ? h("button", { type: "button", className: "atc-btn atc-btn-small atc-voice-tap", onClick: function () { Voice.resume(); } }, "▶ Tap to hear {{agent}}") : null);
   }
 
+  /* ---------- emoji reactions: people click; the agent writes [[react: 👍]] in a reply and it lands on the message before ---------- */
+  var PICKS = ["👍", "👎", "❤️", "😂", "😮", "😢", "😡", "🎉", "🔥", "💯", "👏", "🙏", "🤔", "👀", "✅", "❌", "😀", "😍", "🥳", "😎", "🤯", "😅", "🙌", "💪", "👌", "🤝", "⭐", "💡", "🚀", "🧠", "☕", "🍕"];
+  var REACT_MARK = /\[\[\s*react\s*:\s*([^\]\n]{1,40})\]\]/gi;
+  /* The reply without its reaction markers (a half-written marker at the end is hidden too), and the emojis it asked for. */
+  function splitReact(text) {
+    var emojis = [], src = String(text || "");
+    var out = src.replace(REACT_MARK, function (all, body) {
+      String(body).split(/[\s,]+/).forEach(function (tok) { if (tok && tok.length <= 12 && !/[A-Za-z0-9<>&"'`]/.test(tok) && emojis.indexOf(tok) < 0 && emojis.length < 3) emojis.push(tok); });
+      return "";
+    });
+    out = out.replace(/\[\[[^\]]{0,41}$/, function (tail) { return /^\[\[\s*r?e?a?c?t?:?/i.test(tail) && tail.length < 44 ? "" : tail; });
+    return { text: out.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").replace(/\s+$/, ""), emojis: emojis };
+  }
+
+  function ReactBar(props) {
+    var o = useState(false), open = o[0], setOpen = o[1];
+    var mine = props.reacts || [], theirs = props.agentReacts || [];
+    function pick(e) { setOpen(false); props.onReact(props.idx, e); }
+    return h("div", { className: "atc-reacts" + (mine.length || theirs.length ? " atc-reacts-has" : "") },
+      mine.map(function (r) {
+        return h("button", { key: r.emoji, type: "button", className: "atc-chip" + (r.mine ? " atc-chip-mine" : ""), "aria-pressed": r.mine ? "true" : "false", "aria-label": r.emoji + " " + r.count + (r.mine ? ", yours. Click to remove" : ". Click to add yours"), onClick: function () { props.onReact(props.idx, r.emoji); } }, r.emoji, h("span", { className: "atc-chip-n" }, r.count));
+      }),
+      theirs.map(function (e) { return h("span", { key: "a" + e, className: "atc-chip atc-chip-agent", title: "{{agent}} reacted" }, e, h("span", { className: "atc-chip-n" }, "{{agent}}".charAt(0).toUpperCase())); }),
+      h("span", { className: "atc-react-add" },
+        h("button", { type: "button", className: "atc-chip atc-chip-add", "aria-label": "Add a reaction", "aria-expanded": open ? "true" : "false", onClick: function () { setOpen(!open); } }, "☺+"),
+        open ? h("div", { className: "atc-picker", role: "group", "aria-label": "Pick a reaction" }, PICKS.map(function (e) {
+          return h("button", { key: e, type: "button", className: "atc-pick", "aria-label": e, onClick: function () { pick(e); } }, e);
+        })) : null));
+  }
+
   function Message(props) {
     var m = props.msg;
     var cs = useState(false), copied = cs[0], setCopied = cs[1];
     var vs = useVoice();
+    var bar = (!m.streaming && props.onReact && props.idx !== undefined && (m.text || m.role === "user")) ? h(ReactBar, { idx: props.idx, reacts: props.reacts, agentReacts: props.agentReacts, onReact: props.onReact }) : null;
     if (m.role === "user") {
       var parts = splitUserText(m.text);
       var thumbs = (m.images || []).concat(parts.images.map(imageSrc));
-      return h("div", { className: "atc-msg atc-msg-user" },
+      return h("div", { className: "atc-msg atc-msg-user" }, h("div", { className: "atc-user-col" },
         h("div", { className: "atc-bubble" },
           thumbs.length ? h("div", { className: "atc-thumbs" }, thumbs.map(function (src, i) {
             return h("button", { key: i, type: "button", className: "atc-thumb", "aria-label": "View picture larger", onClick: function () { if (props.onZoom) props.onZoom(src); } },
@@ -683,7 +714,7 @@
           parts.text ? h("div", { className: "atc-user-text" }, parts.text) : null,
           parts.files.length ? h("div", { className: "atc-attached" }, parts.files.map(function (f, i) {
             return h("span", { key: i, className: "atc-filechip" }, "📎 " + f);
-          })) : null));
+          })) : null), bar));
     }
     function copy() { copyText(m.text).then(function () { setCopied(true); setTimeout(function () { setCopied(false); }, 1400); }, function () {}); }
     var empty = !m.text && m.streaming;
@@ -699,7 +730,8 @@
         (!m.streaming && m.text) ? h("div", { className: "atc-msg-actions" },
           h("button", { type: "button", className: "atc-linkbtn", onClick: copy }, copied ? "Copied" : "Copy"),
           Voice.available() ? h("button", { type: "button", className: "atc-linkbtn", onClick: function () { if (mineSpeaking) Voice.stop(); else Voice.speak(msgKey(m), m.text, 6000); } },
-            mineSpeaking ? (vs.status === "loading" ? "Loading…" : "■ Stop") : "🔊 Listen") : null) : null));
+            mineSpeaking ? (vs.status === "loading" ? "Loading…" : "■ Stop") : "🔊 Listen") : null) : null,
+        bar));
   }
 
   var ApprovalCard = window.__APP_CHAT_APPROVAL__.makeCard({ h: h, useState: useState, useRef: useRef, errText: errText });
@@ -1228,6 +1260,30 @@
     var al = useState(false), chatsLoaded = al[0], setChatsLoaded = al[1];
     var ae = useState(""), chatsErr = ae[0], setChatsErr = ae[1];
     var c = useState({ id: "", title: "", msgs: [] }), cur = c[0], setCur = c[1];
+    var rx = useState({}), reacts = rx[0], setReacts = rx[1];
+    useEffect(function () {
+      setReacts({});
+      if (!cur.id || !cur.msgs.length) return;
+      var gone = false;
+      fetchJSON(API + "/reactions/" + encodeURIComponent(cur.id)).then(function (r) { if (!gone) setReacts((r && r.reactions) || {}); }, function () { /* a brand-new chat has none */ });
+      return function () { gone = true; };
+    }, [cur.id, cur.msgs.length > 0]);
+    function react(idx, emoji) {
+      if (!cur.id) return;
+      fetchJSON(API + "/reactions/" + encodeURIComponent(cur.id), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ index: idx, emoji: emoji }) })
+        .then(function (r) { setReacts((r && r.reactions) || {}); }, function (e) { setErr(errText(e)); });
+    }
+    /* what the page shows: replies without their reaction markers, and the agent's reactions pinned to the message before */
+    var shown = { msgs: [], agent: {} };
+    cur.msgs.forEach(function (m, i) {
+      if (m.role === "assistant") {
+        var sp = splitReact(m.text);
+        if (sp.emojis.length) {
+          for (var j = i - 1; j >= 0; j--) if (cur.msgs[j].role === "user") { shown.agent[j] = (shown.agent[j] || []).concat(sp.emojis.filter(function (e) { return (shown.agent[j] || []).indexOf(e) < 0; })); break; }
+        }
+        shown.msgs.push(sp.text === m.text ? m : Object.assign({}, m, { text: sp.text }));
+      } else shown.msgs.push(m);
+    });
     var d = useState(""), draft = d[0], setDraft = d[1];
     // "Give this to the agent" from the Room opens a new chat with the text already in the box (never sent automatically)
     useEffect(function () {
@@ -1688,7 +1744,7 @@
           showEmpty ? h(EmptyState, { name: userName, online: online !== false, onPick: pick, orbState: draft.trim() ? "perk" : "idle" }) : null,
           loadingChat ? h("div", { className: "atc-muted atc-pad" }, "Opening chat…") : null,
           h("div", { className: "atc-msgs" },
-            cur.msgs.map(function (m, i) { return h(Message, { key: i, msg: m, onZoom: setZoom }); }),
+            shown.msgs.map(function (m, i) { return h(Message, { key: i, idx: i, msg: m, reacts: reacts[String(i)], agentReacts: shown.agent[i], onReact: react, onZoom: setZoom }); }),
             busy ? h(Approvals, { controls: run && run.pending, runId: run && run.id, onChoose: choose }) : null)),
           showAvatarComp
             ? h("div", { className: "atc-companion atc-companion-avatar" + (showEmpty ? " atc-companion-away" : ""), "aria-hidden": "true" }, h(UIx.AvatarHero, { state: companionState, compact: true, onFail: function () { setAvFailed(true); } }))
