@@ -6,6 +6,7 @@ These show and change things that belong to the whole install (the agent's notes
 from __future__ import annotations
 
 import os
+import re
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
@@ -21,9 +22,19 @@ def prefix_for(name: str) -> str:
     return "/api/plugins/atrium-" + name
 
 
-# What a person without the owner role may reach when personal mailboxes are on. Anything else an install adds to the mail router (for example a
-# server-wide block list) stays owner-only.
-PERSONAL_MAIL_PATHS = ("/status", "/folders", "/messages", "/send", "/account")
+# What a person without the owner role may reach when personal mailboxes are on: exactly these routes (method and whole path), nothing that merely
+# starts the same way. Anything else an install adds to the mail router (for example a block-list action under /messages/<uid>/spam, which acts on
+# the server-wide mailbox) stays owner-only.
+_MSG = r"/messages/\d+"
+PERSONAL_MAIL_ROUTES = tuple((method, re.compile(pattern)) for method, pattern in (
+    ("GET", r"/status"), ("GET", r"/folders"), ("GET", r"/messages"), ("GET", _MSG), ("GET", _MSG + r"/attachment/\d+"),
+    ("POST", _MSG + r"/flags"), ("POST", _MSG + r"/move"), ("DELETE", _MSG), ("POST", r"/send"),
+    ("GET", r"/account"), ("PUT", r"/account"), ("DELETE", r"/account")))
+
+
+def personal_mail_route(method: str, path: str) -> bool:
+    method = "GET" if method == "HEAD" else method
+    return any(m == method and rx.fullmatch(path) for m, rx in PERSONAL_MAIL_ROUTES)
 
 
 def mail_guard(cfg, current, same_origin, store):
@@ -38,7 +49,7 @@ def mail_guard(cfg, current, same_origin, store):
             raise HTTPException(status_code=401, detail="Not signed in.")
         owner = cfg.allows(who["role"], "admin")
         path = request.url.path[len("/api/mail"):]
-        if not owner and not (cfg.allows(who["role"], "use") and path.startswith(PERSONAL_MAIL_PATHS)):
+        if not owner and not (cfg.allows(who["role"], "use") and personal_mail_route(request.method, path)):
             raise HTTPException(status_code=403, detail="Only owners can use that.")
         if request.method not in ("GET", "HEAD") and not same_origin(request):
             raise HTTPException(status_code=403, detail="Bad origin.")

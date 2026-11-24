@@ -264,11 +264,19 @@ def test_other_routes_an_install_adds_stay_owner_only(mailapp):
             return 200
         except HTTPException as e:
             return e.status_code
-    for path in ("/status", "/folders", "/messages", "/messages/5", "/messages/5/attachment/1", "/send", "/account"):
-        assert ask("user", path) == 200, path
-    for path in ("/blocklist/add", "/block", "/admin"):
-        assert ask("user", path) == 403, path
-    assert ask("owner", "/blocklist/add") == 200
+    allowed = [("GET", "/status"), ("GET", "/folders"), ("GET", "/messages"), ("GET", "/messages/5"), ("GET", "/messages/5/attachment/1"),
+               ("POST", "/messages/5/flags"), ("POST", "/messages/5/move"), ("DELETE", "/messages/5"), ("POST", "/send"),
+               ("GET", "/account"), ("PUT", "/account"), ("DELETE", "/account"), ("HEAD", "/status")]
+    for method, path in allowed:
+        assert ask("user", path, method) == 200, (method, path)
+    # a route an install adds, even one that starts like a core route (the block list acts on the server-wide mailbox), is owner-only
+    denied = [("POST", "/messages/5/spam"), ("GET", "/messages/5/spam"), ("POST", "/blocklist/add"), ("GET", "/block"), ("GET", "/admin"),
+              ("POST", "/messages/5/flags/x"), ("GET", "/messages/abc"), ("GET", "/messages/5/"), ("GET", "/status/"), ("DELETE", "/send"),
+              ("GET", "/send"), ("POST", "/status"), ("PUT", "/messages/5"), ("POST", "/account/x"), ("GET", "/messages/5/attachment/x"),
+              ("POST", "/messages"), ("GET", ""), ("GET", "/")]
+    for method, path in denied:
+        assert ask("user", path, method) == 403, (method, path)
+        assert ask("owner", path, method) == 200, (method, path)                        # owners are not restricted
 
 
 def test_the_email_pages_show_for_everyone_only_when_personal_mailboxes_are_on(mailapp, make, tmp_path):
