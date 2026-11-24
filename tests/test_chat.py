@@ -237,3 +237,49 @@ def test_without_an_approval_service_the_pending_checks_answer_none(chat):
     assert chat.get(P + "/actions/log").json() == {"entries": []}
     chat.post("/logout", headers=H)
     assert chat.get(P + "/actions").status_code == 401                     # still behind the login
+
+
+R = P + "/reactions/"
+
+
+def test_a_person_can_react_and_take_it_back(chat):
+    chat.as_("bob", PW2, "10.6.0.1")
+    send(chat, "atrium-chat-bobreact1")
+    sid = "atrium-chat-bobreact1"
+    assert chat.get(R + sid).json() == {"reactions": {}}
+    r = chat.post(R + sid, json={"index": 1, "emoji": "\U0001F44D"}, headers=H)
+    assert r.json()["reactions"] == {"1": [{"emoji": "\U0001F44D", "count": 1, "mine": True}]}
+    assert chat.get(R + sid).json()["reactions"]["1"][0]["mine"] is True
+    r = chat.post(R + sid, json={"index": 1, "emoji": "\U0001F44D"}, headers=H)          # the same again removes it
+    assert r.json()["reactions"] == {}
+
+
+def test_reactions_are_private_to_the_chat_and_checked(chat):
+    chat.as_("bob", PW2, "10.6.0.2")
+    sid = "atrium-chat-bobreact2"
+    send(chat, sid)
+    for bad in ({"index": 1, "emoji": "a"}, {"index": 1, "emoji": "<b>"}, {"index": 1, "emoji": ""}, {"index": 1, "emoji": "1"},
+                {"index": -1, "emoji": "\U0001F44D"}, {"index": "x", "emoji": "\U0001F44D"}, {"index": True, "emoji": "\U0001F44D"}, {"emoji": "\U0001F44D"}):
+        assert chat.post(R + sid, json=bad, headers=H).status_code == 400, bad
+    assert chat.post(R + sid, json={"index": 0, "emoji": "\u2764\ufe0f"}, headers=H).status_code == 200          # a heart with its selector
+    assert chat.post(R + sid, json={"index": 0, "emoji": "\U0001F44D\U0001F3FD"}, headers=H).status_code == 200   # with a skin tone
+    assert chat.post(R + sid, json={"index": 1, "emoji": "\U0001F44D"}, headers={"origin": "https://evil.test"}).status_code == 403   # another site cannot
+    chat.as_("carol", PW2, "10.6.0.3")
+    assert chat.get(R + sid).status_code == 404                                                                   # not her chat
+    assert chat.post(R + sid, json={"index": 1, "emoji": "\U0001F44D"}, headers=H).status_code == 404
+    chat.as_("alice", PW, "10.6.0.4")
+    assert chat.get(R + sid).status_code == 200                                                                   # owners may look
+    chat.post("/logout", headers=H)
+    assert chat.get(R + sid).status_code == 401
+
+
+def test_one_message_holds_a_limited_number_of_kinds_and_reactions_go_with_the_chat(chat):
+    chat.as_("bob", PW2, "10.6.0.5")
+    sid = "atrium-chat-bobreact3"
+    send(chat, sid)
+    kinds = ["\U0001F600", "\U0001F601", "\U0001F602", "\U0001F603", "\U0001F604", "\U0001F605", "\U0001F606", "\U0001F607"]
+    for e in kinds:
+        assert chat.post(R + sid, json={"index": 0, "emoji": e}, headers=H).status_code == 200
+    assert chat.post(R + sid, json={"index": 0, "emoji": "\U0001F608"}, headers=H).status_code == 400
+    assert chat.delete("/api/sessions/" + sid, headers=H).status_code == 200
+    assert chat.app.state.chat_reactions.get(sid, "bob") == {}

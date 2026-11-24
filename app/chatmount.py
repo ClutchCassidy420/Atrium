@@ -18,6 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from agentkit import atomic_write_text
+from chat_reactions import Reactions
 
 PREFIX = "/api/plugins/atrium-chat"
 CHAT_PREFIX = "atrium-chat-"
@@ -164,6 +165,32 @@ def mount_chat(app, cfg, hermes, current, same_origin) -> ChatOwners:
         @router.get("/actions/log")
         async def no_action_log():
             return {"entries": []}
+    reactions = Reactions(cfg.data_dir / "chat_reactions.json")
+
+    @router.get("/reactions/{sid}")
+    async def reactions_get(sid: str, request: Request):
+        who = request.state.who
+        if not SESSION_ID.fullmatch(sid) or not await may_use_session(who, sid):
+            raise HTTPException(status_code=404, detail="Not found.")
+        return {"reactions": reactions.get(sid, who["user"])}
+
+    @router.post("/reactions/{sid}")
+    async def reactions_toggle(sid: str, request: Request):
+        who = request.state.who
+        if not SESSION_ID.fullmatch(sid) or not await may_use_session(who, sid):
+            raise HTTPException(status_code=404, detail="Not found.")
+        try:
+            body = await request.json()
+        except ValueError:
+            body = {}
+        if not isinstance(body, dict):
+            body = {}
+        try:
+            return {"reactions": reactions.toggle(sid, body.get("index"), body.get("emoji"), who["user"])}
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+    app.state.chat_reactions = reactions
     app.include_router(router, prefix=PREFIX, dependencies=[Depends(guard)])
 
     # ---- the dashboard routes the chat page calls (answered here, with the fixed token) ---------------------------------
@@ -240,6 +267,7 @@ def mount_chat(app, cfg, hermes, current, same_origin) -> ChatOwners:
         status, data = await hermes.dash_call(method, path, payload)
         if method == "DELETE" and status == 200:
             owners.forget(sid)
+            reactions.forget(sid)
         return reply(status, data)
 
     @app.get("/api/sessions/{sid}")
