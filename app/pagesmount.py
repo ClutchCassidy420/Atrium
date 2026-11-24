@@ -29,7 +29,7 @@ _MSG = r"/messages/\d+"
 PERSONAL_MAIL_ROUTES = tuple((method, re.compile(pattern)) for method, pattern in (
     ("GET", r"/status"), ("GET", r"/folders"), ("GET", r"/messages"), ("GET", _MSG), ("GET", _MSG + r"/attachment/\d+"),
     ("POST", _MSG + r"/flags"), ("POST", _MSG + r"/move"), ("DELETE", _MSG), ("POST", r"/send"),
-    ("GET", r"/account"), ("PUT", r"/account"), ("DELETE", r"/account")))
+    ("GET", r"/account"), ("PUT", r"/account"), ("DELETE", r"/account/[a-z0-9]{4,16}")))
 
 
 def personal_mail_route(method: str, path: str) -> bool:
@@ -54,16 +54,23 @@ def mail_guard(cfg, current, same_origin, store):
         if request.method not in ("GET", "HEAD") and not same_origin(request):
             raise HTTPException(status_code=403, detail="Bad origin.")
         request.state.who = who
-        if path.startswith("/account"):                 # connecting or disconnecting must work even when the saved mail server cannot be found right now
-            has_own = await asyncio.to_thread(store.info, who["user"])
-            mail_backend.SERVER_OK.set(owner and not has_own)
+        mail_backend.SERVER_OK.set(owner)                # only owners may ever work on the server-wide mailbox
+        if path.startswith("/account"):                 # connecting or disconnecting must work even when a saved mail server cannot be found right now
             return
+        if not personal_mail_route(request.method, path):
+            return                                      # a route an install added acts on the server-wide mailbox, whichever mailbox the page has open
+        picked = request.query_params.get("account", "")
+        if picked == "server" and not owner:
+            raise HTTPException(status_code=403, detail="That mailbox is not yours.")
+        if picked == "server" or (not picked and owner and mail_backend.server_configured()):
+            return                                      # owners start on the server-wide mailbox when there is one
         try:
-            own = await asyncio.to_thread(store.settings, who["user"])
+            own = await asyncio.to_thread(store.settings, who["user"], picked)
+        except mail_accounts.NoSuchAccount as error:
+            raise HTTPException(status_code=404, detail=str(error)) from None
         except mail_accounts.AccountError as error:
             raise HTTPException(status_code=409, detail=str(error)) from None
         mail_backend.ACCOUNT.set(own)
-        mail_backend.SERVER_OK.set(owner and own is None)
     return guard
 
 
