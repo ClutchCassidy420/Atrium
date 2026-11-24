@@ -21,6 +21,41 @@ def prefix_for(name: str) -> str:
     return "/api/plugins/atrium-" + name
 
 
+# What a person without the owner role may reach when personal mailboxes are on. Anything else an install adds to the mail router (for example a
+# server-wide block list) stays owner-only.
+PERSONAL_MAIL_PATHS = ("/status", "/folders", "/messages", "/send", "/account")
+
+
+def mail_guard(cfg, current, same_origin, store):
+    """Owners keep the server-wide mailbox when there is one. Everyone else works on their own mailbox, found from their session only."""
+    import asyncio
+    import mail_accounts
+    import mail_backend
+
+    async def guard(request: Request):
+        who = current(request)
+        if not who:
+            raise HTTPException(status_code=401, detail="Not signed in.")
+        owner = cfg.allows(who["role"], "admin")
+        path = request.url.path[len("/api/mail"):]
+        if not owner and not (cfg.allows(who["role"], "use") and path.startswith(PERSONAL_MAIL_PATHS)):
+            raise HTTPException(status_code=403, detail="Only owners can use that.")
+        if request.method not in ("GET", "HEAD") and not same_origin(request):
+            raise HTTPException(status_code=403, detail="Bad origin.")
+        request.state.who = who
+        if path.startswith("/account"):                 # connecting or disconnecting must work even when the saved mail server cannot be found right now
+            has_own = await asyncio.to_thread(store.info, who["user"])
+            mail_backend.SERVER_OK.set(owner and not has_own)
+            return
+        try:
+            own = await asyncio.to_thread(store.settings, who["user"])
+        except mail_accounts.AccountError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from None
+        mail_backend.ACCOUNT.set(own)
+        mail_backend.SERVER_OK.set(owner and own is None)
+    return guard
+
+
 def mount_owner_pages(app, cfg, hermes, current, same_origin) -> None:
     if cfg.hermes_data_dir:
         os.environ["HERMES_HOME"] = cfg.hermes_data_dir
@@ -59,7 +94,16 @@ def mount_owner_pages(app, cfg, hermes, current, same_origin) -> None:
     if nextcloud_backend.configure(cfg):                 # Files and Calendar exist only when a Nextcloud is configured
         app.include_router(nextcloud_backend.router, prefix="/api/nextcloud", dependencies=[Depends(guard)])
     import mail_backend
-    if mail_backend.configure(cfg):                     # Email exists only when a mailbox is configured
+    server_mail = mail_backend.configure(cfg)
+    mail_backend.ACCOUNTS = None
+    if cfg.mail_user_accounts:                          # every signed-in person may connect their own mailbox
+        import mail_accounts
+        from users import UserStore
+        store = mail_accounts.Accounts(cfg.data_dir)
+        store.purge([u["username"] for u in UserStore(cfg.data_dir / "users.json").all()])      # a removed person's saved sign-in goes too
+        mail_backend.ACCOUNTS = store
+        app.include_router(mail_backend.router, prefix="/api/mail", dependencies=[Depends(mail_guard(cfg, current, same_origin, store))])
+    elif server_mail:                                   # otherwise Email exists only when a server-wide mailbox is configured, for owners
         app.include_router(mail_backend.router, prefix="/api/mail", dependencies=[Depends(guard)])
     pipeline_backend.configure(cfg, hermes, app)
     app.include_router(pipeline_backend.router, prefix="/api/pipeline", dependencies=[Depends(guard)])

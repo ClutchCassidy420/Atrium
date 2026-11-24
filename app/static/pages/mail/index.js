@@ -190,16 +190,56 @@
           })) : h(window.__APP_UI__.kit.EmptyState, { icon: "📭", title: query ? "Nothing matched “" + query + "”" : "This folder is empty" }),
           data && data.pages > 1 ? h("div", { className: "ml-pager" }, h("button", { type: "button", className: "hm-btn hm-btn-ghost", disabled: page <= 0, onClick: function () { setPage(page - 1); } }, "‹ Newer"), h("span", { className: "hm-sub" }, "Page " + (page + 1) + " of " + data.pages), h("button", { type: "button", className: "hm-btn hm-btn-ghost", disabled: page + 1 >= data.pages, onClick: function () { setPage(page + 1); } }, "Older ›")) : null),
         h("section", { className: "hm-card ml-read" }, h(Reader, { msg: msg, loading: loadingMsg, role: role, canBlock: !!props.canBlock, blocking: blocking, onBlock: blockSpam, onBack: function () { setOpenUid(null); setMsg(null); }, onReply: reply, onForward: forward, onDelete: function () { del(msg.uid); }, onJunk: function () { junk(msg.uid); }, onUnread: function () { unread(msg.uid); } }))),
-      props.address ? h("p", { className: "hm-fine" }, "Signed in as " + props.address + (props.webmail ? " · " : ""), props.webmail ? h("a", { href: props.webmail, target: "_blank", rel: "noopener noreferrer" }, "Open full webmail ↗") : null) : null,
+      props.address ? h("p", { className: "hm-fine" }, "Signed in as " + props.address + (props.webmail ? " · " : ""), props.webmail ? h("a", { href: props.webmail, target: "_blank", rel: "noopener noreferrer" }, "Open full webmail ↗") : null,
+        props.personal ? h("button", { type: "button", className: "hm-btn hm-btn-ghost", style: { marginLeft: ".6rem" }, onClick: function () {
+          if (window.confirm("Disconnect " + props.address + "? Your saved sign-in is removed from this server. Your mail stays where it is.")) {
+            SDK.fetchJSON(API + "/account", { method: "DELETE" }).then(props.disconnect, function (x) { setErr(errText(x)); });
+          }
+        } }, "Disconnect") : null) : null,
       compose ? h(Composer, { draft: compose, onClose: function () { setCompose(null); }, onSent: function () { setCompose(null); after("Sent."); } }) : null);
+  }
+
+  /* Shown to a person who has no mailbox yet (when personal mailboxes are on): pick a provider, give the address and an app password. */
+  function Connect(props) {
+    var K = window.__APP_UI__.kit, presets = props.presets || [];
+    var s = useState({ preset: presets.length ? presets[0].id : "", address: "", password: "", imap_host: "", smtp_host: "" }), f = s[0], setF = s[1];
+    var b = useState(false), busy = b[0], setBusy = b[1], e = useState(""), err = e[0], setErr = e[1];
+    function set(k, v) { var n = Object.assign({}, f); n[k] = v; setF(n); }
+    var chosen = presets.filter(function (p) { return p.id === f.preset; })[0];
+    function submit(ev) {
+      ev.preventDefault();
+      setBusy(true); setErr("");
+      var body = { address: f.address.trim(), password: f.password, preset: f.preset };
+      if (!f.preset) { body.imap_host = f.imap_host.trim(); body.smtp_host = f.smtp_host.trim(); }
+      SDK.fetchJSON(API + "/account", { method: "PUT", headers: JSONH, body: JSON.stringify(body) }).then(function () { setF(Object.assign({}, f, { password: "" })); props.done(); },
+        function (x) { setBusy(false); setErr(errText(x)); });
+    }
+    return h("div", { className: "ml" }, h("h1", null, "Email"),
+      h("form", { className: "hm-card", onSubmit: submit, style: { maxWidth: "34rem", display: "flex", flexDirection: "column", gap: ".8rem" } },
+        h("h2", null, "Connect your email"),
+        h("p", { className: "hm-sub" }, "Read and send from your own mailbox here. Your password is stored encrypted on this server and is never shown again."),
+        err ? h(K.Alert, { tone: "danger" }, err) : null,
+        h(K.Field, { label: "Provider" }, function (ip) {
+          return h("select", Object.assign({}, ip, { className: "hm-select", value: f.preset, onChange: function (x) { set("preset", x.target.value); } }),
+            presets.map(function (p) { return h("option", { key: p.id, value: p.id }, p.label); }), h("option", { key: "", value: "" }, "Other (enter the servers)"));
+        }),
+        chosen ? h("p", { className: "hm-fine" }, chosen.hint) : null,
+        h(K.Field, { label: "Email address", required: true }, function (ip) { return h("input", Object.assign({}, ip, { className: "hm-input", type: "email", autoComplete: "email", maxLength: 320, required: true, value: f.address, onChange: function (x) { set("address", x.target.value); } })); }),
+        h(K.Field, { label: "App password", required: true, hint: "Use an app password, not your normal password." }, function (ip) { return h("input", Object.assign({}, ip, { className: "hm-input", type: "password", autoComplete: "off", maxLength: 512, required: true, value: f.password, onChange: function (x) { set("password", x.target.value); } })); }),
+        !f.preset ? h(SDK.React.Fragment, null,
+          h(K.Field, { label: "Incoming server (IMAP)", required: true, hint: "A public name such as imap.example.com. Port 993 with TLS is used." }, function (ip) { return h("input", Object.assign({}, ip, { className: "hm-input", type: "text", maxLength: 253, required: true, value: f.imap_host, onChange: function (x) { set("imap_host", x.target.value); } })); }),
+          h(K.Field, { label: "Outgoing server (SMTP)", required: true, hint: "A public name such as smtp.example.com. Port 465 with TLS is used." }, function (ip) { return h("input", Object.assign({}, ip, { className: "hm-input", type: "text", maxLength: 253, required: true, value: f.smtp_host, onChange: function (x) { set("smtp_host", x.target.value); } })); })) : null,
+        h("div", null, h(K.Button, { type: "submit", variant: "primary", loading: busy }, "Connect"))));
   }
 
   function Wrap(role, compose) {
     return function Entry() {
-      var a = useState(null), st = a[0], set = a[1];
-      useEffect(function () { SDK.fetchJSON(API + "/status").then(set, function () { set({}); }); }, []);
+      var a = useState(null), st = a[0], set = a[1], t = useState(0), n = t[0], setN = t[1];
+      useEffect(function () { SDK.fetchJSON(API + "/status").then(set, function () { set({}); }); }, [n]);
       if (!st) return h("div", { className: "ml" }, h(window.__APP_UI__.kit.Loading, { label: "Loading…" }));
-      return h(Page, { role: role, compose: compose, address: st.address, webmail: st.webmail, canBlock: (st.features || []).indexOf("blocklist") >= 0 });
+      if (st.connected === false && st.user_accounts) return h(Connect, { presets: st.presets, done: function () { setN(n + 1); } });
+      return h(Page, { role: role, compose: compose, address: st.address, webmail: st.webmail, canBlock: (st.features || []).indexOf("blocklist") >= 0,
+        personal: st.account === "personal", disconnect: function () { setN(n + 1); } });
     };
   }
   REG.register("mail-inbox", Wrap("inbox"));
