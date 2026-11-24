@@ -110,7 +110,8 @@ def mount_owner_pages(app, cfg, hermes, current, same_origin) -> None:
     if cfg.mail_user_accounts:                          # every signed-in person may connect their own mailbox
         import mail_accounts
         from users import UserStore
-        store = mail_accounts.Accounts(cfg.data_dir)
+        store = mail_accounts.Accounts(cfg.data_dir, cfg.mail_accounts_key)
+        store.migrate()                                 # logins saved under the old key file move to the key from the settings
         store.purge([u["username"] for u in UserStore(cfg.data_dir / "users.json").all()])      # a removed person's saved sign-in goes too
         mail_backend.ACCOUNTS = store
         app.include_router(mail_backend.router, prefix="/api/mail", dependencies=[Depends(mail_guard(cfg, current, same_origin, store))])

@@ -300,3 +300,70 @@ def test_a_removed_person_loses_their_saved_sign_in_at_startup(make, tmp_path):
     make(users=(("alice", "owner", PW),), config=c)
     assert ma.Accounts(data).info("ghost") is None
     mb.ACCOUNTS = None
+
+
+# ---------------------------------------------------------------- the key can live in the settings, away from the data folder
+
+KEY = "k" * 20 + "E" * 20 + "9" * 8
+OTHER_KEY = "z" * 48
+
+
+def test_a_key_from_the_settings_means_no_key_file_and_a_copied_data_folder_opens_nothing(tmp_path):
+    store = ma.Accounts(tmp_path, KEY)
+    store.save("bob", store.build("bob@gmail.com", SECRET, preset="gmail", resolver=pub))
+    assert not store.keyfile.exists()
+    assert store.settings("bob", resolver=pub).mail_token == SECRET
+    stolen = ma.Accounts(tmp_path)                                     # someone with only the data folder: it makes its own key
+    with pytest.raises(ma.AccountError, match="Connect your email again"):
+        stolen.settings("bob", resolver=pub)
+    with pytest.raises(ma.AccountError, match="Connect your email again"):
+        ma.Accounts(tmp_path, OTHER_KEY).settings("bob", resolver=pub)  # and a wrong key opens nothing either
+    assert SECRET not in store.path.read_text()
+
+
+def test_the_key_must_be_long_enough(tmp_path):
+    for short in ("x", "x" * 31):
+        with pytest.raises(ma.AccountError):
+            ma.Accounts(tmp_path, short)
+        with pytest.raises(ValueError, match="at least 32"):
+            configmod.load({"DATA_DIR": str(tmp_path), "MAIL_ACCOUNTS_KEY": short})
+    assert configmod.load({"DATA_DIR": str(tmp_path), "MAIL_ACCOUNTS_KEY": KEY}).mail_accounts_key == KEY
+    assert configmod.load({"DATA_DIR": str(tmp_path)}).mail_accounts_key == ""
+
+
+def test_logins_saved_under_the_old_key_file_move_to_the_new_key_and_the_file_is_destroyed(tmp_path):
+    old = ma.Accounts(tmp_path)
+    for u in ("bob", "carol"):
+        old.save(u, old.build(u + "@gmail.com", SECRET + u, preset="gmail", resolver=pub))
+    assert old.keyfile.exists()
+    new = ma.Accounts(tmp_path, KEY)
+    assert new.migrate() == 2
+    assert not new.keyfile.exists()
+    assert new.settings("bob", resolver=pub).mail_token == SECRET + "bob" and new.settings("carol", resolver=pub).mail_token == SECRET + "carol"
+    assert new.migrate() == 0                                          # nothing left to do
+    with pytest.raises(ma.AccountError):
+        ma.Accounts(tmp_path).settings("bob", resolver=pub)             # the old key is gone: a plain store cannot open them
+
+
+def test_a_migration_that_cannot_open_every_login_changes_nothing(tmp_path):
+    old = ma.Accounts(tmp_path)
+    old.save("bob", old.build("bob@gmail.com", SECRET, preset="gmail", resolver=pub))
+    old.save("carol", old.build("carol@gmail.com", SECRET, preset="gmail", resolver=pub))
+    data = json.loads(old.path.read_text())
+    data["carol"]["sealed"] = data["bob"]["sealed"]                     # bound to bob, so it does not open for carol
+    old.path.write_text(json.dumps(data))
+    before = old.path.read_text()
+    new = ma.Accounts(tmp_path, KEY)
+    assert new.migrate() == 0 and new.keyfile.exists() and old.path.read_text() == before
+
+
+def test_the_app_uses_the_key_from_the_settings_and_moves_existing_logins_at_start(make, tmp_path):
+    data = tmp_path / "data"
+    data.mkdir(parents=True)
+    old = ma.Accounts(data)
+    old.save("alice", old.build("alice@gmail.com", SECRET, preset="gmail", resolver=pub))
+    c = configmod.Config(data_dir=data, instance_dir=tmp_path / "instance", trusted_proxies=["testclient"], mail_user_accounts=True, mail_accounts_key=KEY)
+    make(users=(("alice", "owner", PW),), config=c)
+    assert not (data / "mail-accounts.key").exists()
+    assert ma.Accounts(data, KEY).settings("alice", resolver=pub).mail_token == SECRET
+    mb.ACCOUNTS = None
