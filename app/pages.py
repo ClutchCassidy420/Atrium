@@ -37,7 +37,7 @@ def _clean(raw: dict, source: str) -> dict:
         "order": raw.get("order", 100),
         "icon": str(raw.get("icon") or "").strip(),            # a short symbol or emoji shown beside the label in the sidebar
         "nav": str(raw.get("nav") or "").strip(),          # "" = listed in the sidebar; "gear" = reached by the gear icon at the bottom of the sidebar instead
-        "requires": str(raw.get("requires") or "").strip(),    # "" = always; "mail" or "nextcloud" = only when that service is configured
+        "requires": str(raw.get("requires") or "").strip(),    # "" = always; "mail", "nextcloud" or "rea" = only when that service is configured
     }
     for a in page["aliases"]:
         if not PATH_RE.match(a) or a == "/" or any(a == r or a.startswith(r + "/") for r in RESERVED):
@@ -46,8 +46,8 @@ def _clean(raw: dict, source: str) -> dict:
         raise ValueError("%s: the subgroup of page %r is too long, or has no group" % (source, page["id"]))
     if len(page["icon"]) > 8:
         raise ValueError("%s: the icon of page %r is too long (use one symbol or emoji)" % (source, page["id"]))
-    if page["requires"] not in ("", "mail", "nextcloud"):
-        raise ValueError("%s: the requires of page %r must be empty, \"mail\" or \"nextcloud\"" % (source, page["id"]))
+    if page["requires"] not in ("", "mail", "nextcloud", "rea"):
+        raise ValueError("%s: the requires of page %r must be empty, \"mail\", \"nextcloud\" or \"rea\"" % (source, page["id"]))
     if page["nav"] not in ("", "gear"):
         raise ValueError("%s: the nav of page %r must be empty or \"gear\"" % (source, page["id"]))
     if len(page["group"]) > 30:

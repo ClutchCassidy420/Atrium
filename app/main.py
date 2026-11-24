@@ -57,7 +57,8 @@ def make_app(cfg: configmod.Config | None = None, hermes: Hermes | None = None, 
     throttle = Throttle(cfg.max_fails, cfg.lock_minutes * 60)
     chat_model.configure(cfg.data_dir)
     configured = {"mail": bool(cfg.mail_address and cfg.mail_token and cfg.mail_imap_host) or cfg.mail_user_accounts,
-                  "nextcloud": bool(cfg.nextcloud_url and cfg.nextcloud_user and cfg.nextcloud_password)}
+                  "nextcloud": bool(cfg.nextcloud_url and cfg.nextcloud_user and cfg.nextcloud_password),
+                  "rea": bool(cfg.rea_url and cfg.rea_token)}
     pages = [p for p in load_pages(HERE / "pages.json", cfg.instance_dir, cfg.pages_disabled) if not p["requires"] or configured[p["requires"]]]
     if cfg.mail_user_accounts:                          # personal mailboxes: the Email pages are for everyone who may use the app, not only owners
         for p in pages:

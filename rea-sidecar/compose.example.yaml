@@ -1,0 +1,36 @@
+# The REA workbench: read-only analysis of uploaded programs and apps for the REA page (off unless REA_URL and REA_TOKEN are set).
+# Safety: the container is on an INTERNAL network (no route to the internet or to anything but the web app), has no published port, runs as an
+# ordinary user with a read-only system, and has limits on memory, processors and processes. Uploaded programs are only read, never run.
+# Copy to your install and edit the paths and addresses.
+services:
+  rea:
+    build:
+      context: .
+      args:
+        UID: 2100
+        GID: 2100
+    image: atrium-rea:1
+    container_name: atrium-rea
+    restart: unless-stopped
+    environment:
+      REA_TOKEN: "${REA_TOKEN}"            # shared secret with the web app (put it in .env next to this file)
+      TZ: "America/Chicago"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 8g
+    cpus: 4
+    pids_limit: 512
+    tmpfs:
+      - /tmp:size=2g,mode=1777
+    volumes:
+      - /srv/example/rea-work:/work        # uploads and results (deleted after a day); owned by the same user id as UID above
+    networks:
+      rea-inner:
+        ipv4_address: 172.31.1.10
+networks:
+  rea-inner:                               # shared with the web app only; "internal" means no way out
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.31.1.0/29
