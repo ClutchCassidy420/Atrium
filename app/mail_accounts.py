@@ -35,15 +35,28 @@ WINDOW = 600
 
 # Providers that offer app passwords and implicit-TLS SMTP. (Outlook.com and iCloud only offer SMTP with STARTTLS, and Microsoft turns off
 # password sign-in on most accounts; they need a different kind of connection and are not offered here.)
+# help_url is the provider's own page where a person makes an app password (it asks them to sign in first); steps are the same thing in a few plain
+# lines for the Connect form. The links were checked on 2026-11-24: each loads and returns to the page after sign-in.
 PRESETS = [
     {"id": "gmail", "label": "Gmail", "imap": "imap.gmail.com", "smtp": "smtp.gmail.com",
-     "hint": "Turn on 2-Step Verification, then create an App password in your Google Account and use that here."},
+     "help_url": "https://myaccount.google.com/apppasswords",
+     "hint": "Turn on 2-Step Verification, then create an App password in your Google Account and use that here.",
+     "steps": ["Turn on 2-Step Verification in your Google Account.", "Create an app password and name it Atrium.",
+               "Paste the 16 characters here (spaces are fine)."]},
     {"id": "yahoo", "label": "Yahoo Mail", "imap": "imap.mail.yahoo.com", "smtp": "smtp.mail.yahoo.com",
-     "hint": "Create an app password in Yahoo Account Security and use that here."},
+     "help_url": "https://login.yahoo.com/account/security",
+     "hint": "Create an app password in Yahoo Account Security and use that here.",
+     "steps": ["Open Yahoo Account security and sign in.", "Generate an app password and name it Atrium.", "Paste it here (spaces are fine)."]},
     {"id": "fastmail", "label": "Fastmail", "imap": "imap.fastmail.com", "smtp": "smtp.fastmail.com",
-     "hint": "Create an app password in Fastmail's Password & Security settings (with IMAP and SMTP access)."},
+     "help_url": "https://app.fastmail.com/settings/security/devicekeys",
+     "hint": "Create an app password in Fastmail's Password & Security settings (with IMAP and SMTP access).",
+     "steps": ["Open Password & Security in Fastmail and sign in.", "Create an app password named Atrium with Mail (IMAP and SMTP) access.",
+               "Paste it here."]},
     {"id": "zoho", "label": "Zoho Mail", "imap": "imap.zoho.com", "smtp": "smtp.zoho.com",
-     "hint": "Turn on IMAP in Zoho Mail settings and create an application-specific password."},
+     "help_url": "https://accounts.zoho.com/home#security/app_password",
+     "hint": "Turn on IMAP in Zoho Mail settings and create an application-specific password.",
+     "steps": ["Turn on IMAP in your Zoho Mail settings.", "Open Security, then App passwords, and create one named Atrium.", "Paste it here.",
+               "In Europe, India or Australia, use your own Zoho region's account page."]},
 ]
 PRESET_BY_ID = {p["id"]: p for p in PRESETS}
 

@@ -1,7 +1,9 @@
 """Personal mailboxes for the Email pages: each person connects their own, safely. Synthetic only (no mail server, no network)."""
 import asyncio
+import imaplib
 import json
 import os
+import smtplib
 import socket
 import sys
 from contextlib import contextmanager
@@ -21,6 +23,7 @@ from conftest import PW, PW2, login
 from test_mail import Box
 
 H = {"origin": "https://app.test"}
+ORIG_TEST_LOGIN = mb._test_login
 API = "/api/mail"
 SECRET = "app-password-" + "x9q7z4"
 
@@ -462,3 +465,134 @@ def test_the_app_uses_the_key_from_the_settings_and_moves_existing_logins_at_sta
     assert not (data / "mail-accounts.key").exists()
     assert ma.Accounts(data, KEY).settings("alice", resolver=pub).mail_token == SECRET
     mb.ACCOUNTS = None
+
+
+# ---------------------------------------------------------------- help for getting an app password, and a clear message when it is refused
+
+HELP_HOSTS = {"gmail": "myaccount.google.com", "yahoo": "login.yahoo.com", "fastmail": "app.fastmail.com", "zoho": "accounts.zoho.com"}
+
+
+def test_every_provider_has_a_help_page_and_plain_steps():
+    assert {p["id"] for p in ma.PRESETS} == set(HELP_HOSTS)
+    for p in ma.PRESETS:
+        assert p["help_url"].startswith("https://" + HELP_HOSTS[p["id"]] + "/"), p["id"]
+        assert " " not in p["help_url"] and "@" not in p["help_url"]
+        assert isinstance(p["steps"], list) and 2 <= len(p["steps"]) <= 5 and all(isinstance(s, str) and s.endswith((".", ")")) for s in p["steps"]), p["id"]
+        assert p["hint"]
+    gmail = [p for p in ma.PRESETS if p["id"] == "gmail"][0]
+    assert gmail["steps"] == ["Turn on 2-Step Verification in your Google Account.", "Create an app password and name it Atrium.",
+                              "Paste the 16 characters here (spaces are fine)."]
+
+
+def test_the_page_is_given_the_help_but_never_the_server_addresses(mailapp):
+    c = mailapp()
+    as_(c, "bob", PW2, "10.9.8.1")
+    presets = c.get(API + "/status").json()["presets"]
+    assert [p["id"] for p in presets] == [p["id"] for p in ma.PRESETS]
+    for given, known in zip(presets, ma.PRESETS):
+        assert given == {"id": known["id"], "label": known["label"], "hint": known["hint"], "help_url": known["help_url"], "steps": known["steps"]}
+    assert "imap." not in json.dumps(presets) and "smtp." not in json.dumps(presets)
+    connect(c)
+    assert c.get(API + "/status").json()["presets"][0]["help_url"] == ma.PRESETS[0]["help_url"]             # also there for Add another
+
+
+class FakeIMAP:
+    mode = "ok"
+
+    def __init__(self, host, port, tls_server_name, timeout=25):
+        if FakeIMAP.mode == "unreachable":
+            raise OSError("no route to host")
+
+    def login(self, user, password):
+        if FakeIMAP.mode == "refused":
+            raise imaplib.IMAP4.error("[AUTHENTICATIONFAILED] Invalid credentials " + password)
+
+    def logout(self):
+        pass
+
+
+class FakeSMTP:
+    mode = "ok"
+
+    def __init__(self, host, port, tls_server_name, timeout=30):
+        if FakeSMTP.mode == "unreachable":
+            raise OSError("no route to host")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def login(self, user, password):
+        if FakeSMTP.mode == "refused":
+            raise smtplib.SMTPAuthenticationError(535, ("Username and Password not accepted " + password).encode())
+        if FakeSMTP.mode == "other":
+            raise smtplib.SMTPException("something odd " + password)
+
+
+def settings_for(preset="gmail"):
+    return SimpleNamespace(mail_address="bob@gmail.com", mail_token=SECRET, preset=preset, mail_imap_host="93.184.216.34", mail_imap_port=993,
+                           mail_imap_tls_server_name="imap.gmail.com", mail_smtp_host="93.184.216.34", mail_smtp_port=465, mail_smtp_tls_server_name="smtp.gmail.com")
+
+
+@pytest.fixture()
+def fake_servers(monkeypatch):
+    monkeypatch.setattr(mb, "_VerifiedIMAP4SSL", FakeIMAP)
+    monkeypatch.setattr(mb, "_VerifiedSMTPSSL", FakeSMTP)
+    monkeypatch.setattr(FakeIMAP, "mode", "ok")
+    monkeypatch.setattr(FakeSMTP, "mode", "ok")
+    return SimpleNamespace(imap=lambda m: monkeypatch.setattr(FakeIMAP, "mode", m), smtp=lambda m: monkeypatch.setattr(FakeSMTP, "mode", m))
+
+
+def refusal(s):
+    with pytest.raises(HTTPException) as e:
+        ORIG_TEST_LOGIN(s)
+    assert SECRET not in e.value.detail and "bob@gmail.com" not in e.value.detail             # nothing typed is ever echoed back
+    return e.value.status_code, e.value.detail
+
+
+APP_PASSWORD = "That provider needs an app password, not your normal password."
+CHECK = "The mail server did not accept the sign-in. Check the address and the password."
+UNREACHABLE = "Could not reach the mail server securely. Check the server names and try again."
+
+
+def test_a_refused_sign_in_asks_for_an_app_password_for_a_known_provider(fake_servers):
+    ORIG_TEST_LOGIN(settings_for())                                                          # both servers accept: no error
+    fake_servers.imap("refused")
+    assert refusal(settings_for()) == (502, APP_PASSWORD)
+    fake_servers.imap("ok")
+    fake_servers.smtp("refused")
+    assert refusal(settings_for()) == (502, APP_PASSWORD)                                    # the outgoing server refusing is the same cause
+
+
+def test_a_refused_sign_in_on_another_server_gets_a_plain_message(fake_servers):
+    fake_servers.imap("refused")
+    assert refusal(settings_for(preset="")) == (502, CHECK)
+    fake_servers.imap("ok")
+    fake_servers.smtp("refused")
+    assert refusal(settings_for(preset="")) == (502, CHECK)
+
+
+def test_a_server_that_cannot_be_reached_is_not_blamed_on_the_password(fake_servers):
+    fake_servers.imap("unreachable")
+    assert refusal(settings_for()) == (502, UNREACHABLE)
+    fake_servers.imap("ok")
+    fake_servers.smtp("unreachable")
+    assert refusal(settings_for()) == (502, UNREACHABLE)
+    fake_servers.smtp("other")
+    assert refusal(settings_for()) == (502, "The outgoing mail server did not accept the sign-in.")
+
+
+def test_the_form_gets_the_clear_message_and_the_password_is_never_returned(mailapp, monkeypatch, fake_servers):
+    c = mailapp()
+    monkeypatch.setattr(mb, "_test_login", ORIG_TEST_LOGIN)
+    as_(c, "bob", PW2, "10.9.8.2")
+    fake_servers.imap("refused")
+    r = connect(c)
+    assert r.status_code == 502 and r.json() == {"detail": APP_PASSWORD} and SECRET not in r.text
+    r = connect(c, preset="", imap_host="imap.example.org", smtp_host="smtp.example.org")
+    assert r.status_code == 502 and r.json() == {"detail": CHECK} and SECRET not in r.text
+    assert c.get(API + "/status").json()["connected"] is False                              # nothing was saved
+    fake_servers.imap("ok")
+    assert connect(c).status_code == 200
