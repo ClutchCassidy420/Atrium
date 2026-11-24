@@ -35,6 +35,7 @@ import sqlite3
 import ssl
 import time
 from contextlib import closing, contextmanager
+from contextvars import ContextVar
 from datetime import timezone
 from email import policy
 from email.header import decode_header, make_header
@@ -43,9 +44,11 @@ from email.utils import formataddr, getaddresses, make_msgid, parseaddr, parseda
 from html.parser import HTMLParser
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictStr, ValidationError
+
+import mail_accounts as ma
 
 router = APIRouter()
 CFG = None
@@ -57,11 +60,31 @@ READ_HOOKS: list = []                   # an install may add functions that take
 FEATURES: set[str] = set()              # extra controls an install has added (for example "blocklist"); the page reads them from /status
 LOG = logging.getLogger(__name__)
 
+# Per-person mailboxes (MAIL_USER_ACCOUNTS=1). The mount sets ACCOUNTS to the encrypted store and, for each request, ACCOUNT to the signed-in
+# person's checked settings and SERVER_OK to whether that person may use the server-wide mailbox (owners, when they have none of their own).
+ACCOUNTS = None
+ACCOUNT: ContextVar = ContextVar("mail_account", default=None)
+SERVER_OK: ContextVar = ContextVar("mail_server_ok", default=True)
+
 
 def configure(cfg) -> bool:
     global CFG
     CFG = cfg
-    return bool(cfg.mail_address and cfg.mail_token and cfg.mail_imap_host)
+    return server_configured()
+
+
+def server_configured() -> bool:
+    return bool(CFG and CFG.mail_address and CFG.mail_token and CFG.mail_imap_host)
+
+
+def _cfg():
+    """The mailbox this request works on: the person's own, else the server-wide one when this person may use it."""
+    own = ACCOUNT.get()
+    if own is not None:
+        return own
+    if SERVER_OK.get() and server_configured():
+        return CFG
+    raise HTTPException(status_code=409, detail="Connect your email first.")
 
 
 class _VerifiedIMAP4SSL(imaplib.IMAP4_SSL):
@@ -117,15 +140,16 @@ def _refresh_caps(m) -> None:
 
 @contextmanager
 def _imap():
+    c = _cfg()
     try:
         m = _VerifiedIMAP4SSL(
-            CFG.mail_imap_host,
-            CFG.mail_imap_port,
-            CFG.mail_imap_tls_server_name or CFG.mail_imap_host,
+            c.mail_imap_host,
+            c.mail_imap_port,
+            c.mail_imap_tls_server_name or c.mail_imap_host,
             timeout=25,
         )
         m._encoding = "utf-8"
-        m.login(CFG.mail_address, CFG.mail_token)
+        m.login(c.mail_address, c.mail_token)
         _refresh_caps(m)
     except (imaplib.IMAP4.error, OSError, ValueError):
         raise HTTPException(status_code=502, detail="The mail server did not accept the sign-in.")
@@ -424,7 +448,13 @@ class SendIn(BaseModel):
 
 @router.get("/status")
 async def status():
-    return {"connected": True, "address": CFG.mail_address, "webmail": CFG.mail_webmail_url, "features": sorted(FEATURES)}
+    own = ACCOUNT.get()
+    if own is None and not (SERVER_OK.get() and server_configured()):         # signed in, but no mailbox yet
+        return {"connected": False, "account": None, "user_accounts": ACCOUNTS is not None, "features": [],
+                "presets": [{"id": p["id"], "label": p["label"], "hint": p["hint"]} for p in ma.PRESETS]}
+    c = own or CFG
+    return {"connected": True, "account": "personal" if own is not None else "server", "address": c.mail_address, "webmail": c.mail_webmail_url,
+            "features": sorted(FEATURES), "user_accounts": ACCOUNTS is not None}
 
 
 @router.get("/folders")
@@ -441,7 +471,7 @@ async def folders():
                 except Exception:
                     f["total"], f["unseen"] = 0, 0
             return out
-    return {"folders": await asyncio.to_thread(work), "address": CFG.mail_address}
+    return {"folders": await asyncio.to_thread(work), "address": _cfg().mail_address}
 
 
 @router.get("/messages")
@@ -556,13 +586,14 @@ async def send(body: SendIn):
         raise HTTPException(status_code=400, detail="Add at least one recipient.")
     total = 0
     msg = EmailMessage()
-    msg["From"] = CFG.mail_address
+    c = _cfg()
+    msg["From"] = c.mail_address
     msg["To"] = ", ".join(to)
     if cc:
         msg["Cc"] = ", ".join(cc)
     msg["Subject"] = body.subject.strip().replace("\r", " ").replace("\n", " ")
     msg["Date"] = email.utils.formatdate(localtime=False)
-    msg["Message-ID"] = make_msgid(domain=CFG.mail_address.split("@")[-1])
+    msg["Message-ID"] = make_msgid(domain=c.mail_address.split("@")[-1])
     ref = None
     if body.reply_uid and body.reply_folder:
         try:
@@ -608,9 +639,9 @@ async def send(body: SendIn):
             return {"ok": True, "filed": previous == "filed", "duplicate": True}
         refused = {}
         try:
-            with _VerifiedSMTPSSL(CFG.mail_smtp_host, CFG.mail_smtp_port, CFG.mail_smtp_tls_server_name or CFG.mail_smtp_host) as s:
-                s.login(CFG.mail_address, CFG.mail_token)
-                refused = s.send_message(msg, from_addr=CFG.mail_address, to_addrs=to + cc + bcc)
+            with _VerifiedSMTPSSL(c.mail_smtp_host, c.mail_smtp_port, c.mail_smtp_tls_server_name or c.mail_smtp_host) as s:
+                s.login(c.mail_address, c.mail_token)
+                refused = s.send_message(msg, from_addr=c.mail_address, to_addrs=to + cc + bcc)
         except smtplib.SMTPRecipientsRefused:
             record("release")
             raise HTTPException(status_code=400, detail="The mail server refused those recipients.")
@@ -643,3 +674,78 @@ async def send(body: SendIn):
             out["refused"] = sorted(refused)        # accepted for the others, refused for these
         return out
     return await asyncio.to_thread(work)
+
+
+# --- a person's own mailbox (MAIL_USER_ACCOUNTS=1) --------------------------------------------------------------------------------------
+# The mount puts the signed-in person in request.state.who. These routes only ever act on that person, never on a name taken from the request.
+
+class AccountIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    address: StrictStr = Field(max_length=320)
+    password: StrictStr = Field(max_length=ma.MAX_PASSWORD)
+    preset: StrictStr = Field("", max_length=20)
+    imap_host: StrictStr = Field("", max_length=253)
+    smtp_host: StrictStr = Field("", max_length=253)
+
+
+def _me(request: Request) -> str:
+    who = getattr(request.state, "who", None)
+    if ACCOUNTS is None or not who:
+        raise HTTPException(status_code=404, detail="Personal mailboxes are not turned on.")
+    return who["user"]
+
+
+def _test_login(c) -> None:
+    """Sign in to the incoming and the outgoing server once, so a wrong password or host is found before anything is saved."""
+    token = ACCOUNT.set(c)
+    try:
+        with _imap():
+            pass
+    finally:
+        ACCOUNT.reset(token)
+    try:
+        with _VerifiedSMTPSSL(c.mail_smtp_host, c.mail_smtp_port, c.mail_smtp_tls_server_name) as s:
+            s.login(c.mail_address, c.mail_token)
+    except (smtplib.SMTPException, ssl.SSLError, OSError, ValueError):
+        raise HTTPException(status_code=502, detail="The outgoing mail server did not accept the sign-in.") from None
+
+
+@router.get("/account")
+async def account(request: Request):
+    user = _me(request)
+    return {"personal": await asyncio.to_thread(ACCOUNTS.info, user), "server": bool(SERVER_OK.get() and server_configured())}
+
+
+@router.put("/account")
+async def connect_account(request: Request):
+    user = _me(request)
+    if SERVER_OK.get() and server_configured():
+        raise HTTPException(status_code=409, detail="This install already gives you the server's mailbox.")
+    raw = bytearray()
+    async for chunk in request.stream():                     # parsed by hand so a validation message can never echo the password back
+        raw.extend(chunk)
+        if len(raw) > 8192:
+            raise HTTPException(status_code=413, detail="That is too large.")
+    try:
+        body = AccountIn.model_validate_json(bytes(raw))
+    except ValidationError:
+        raise HTTPException(status_code=400, detail="Fill in your address and app password.") from None
+    if not ACCOUNTS.allow_attempt(user):
+        raise HTTPException(status_code=429, detail="Too many tries. Wait a few minutes and try again.")
+
+    def work():
+        try:
+            c = ACCOUNTS.build(body.address, body.password, body.preset, body.imap_host, body.smtp_host)
+        except ma.AccountError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from None
+        _test_login(c)
+        ACCOUNTS.save(user, c)
+        return ACCOUNTS.info(user)
+    return {"personal": await asyncio.to_thread(work)}
+
+
+@router.delete("/account")
+async def disconnect_account(request: Request):
+    user = _me(request)
+    await asyncio.to_thread(ACCOUNTS.delete, user)
+    return {"ok": True}

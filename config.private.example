@@ -26,6 +26,7 @@ MAIL_IMAP_TLS_SERVER_NAME=  # the name on the server's certificate, if MAIL_IMAP
 MAIL_SMTP_HOST=             # SMTP over implicit TLS (default port 465, MAIL_SMTP_PORT)
 MAIL_SMTP_TLS_SERVER_NAME=  # the name on the server's certificate, if MAIL_SMTP_HOST is some other address
 MAIL_WEBMAIL_URL=           # optional: the full webmail, for an "Open webmail" link
+MAIL_USER_ACCOUNTS=         # 1 = every signed-in person connects their own mailbox (an app password) on the Email pages; off by default
 
 # Files and Calendar (optional: shown only when these are set; WebDAV and CalDAV on a Nextcloud server)
 NEXTCLOUD_URL=              # where the app reaches Nextcloud, e.g. https://cloud.example.com or an address on a private network
