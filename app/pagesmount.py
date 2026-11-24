@@ -7,9 +7,11 @@ from __future__ import annotations
 
 import os
 import re
+from types import SimpleNamespace
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
+import extension_hooks
 from connections_backend import connection_router
 from model_setup import model_setup_router
 
@@ -111,9 +113,13 @@ def mount_owner_pages(app, cfg, hermes, current, same_origin) -> None:
     import nextcloud_backend
     if nextcloud_backend.configure(cfg):                 # Files and Calendar exist only when a Nextcloud is configured
         app.include_router(nextcloud_backend.router, prefix="/api/nextcloud", dependencies=[Depends(guard)])
+    ctx = SimpleNamespace(guard=guard, hermes=hermes, current=current, same_origin=same_origin, mail_backend=None, server_mail=False)
+    extension_hooks.call("mount_pages", app, cfg, ctx)   # a private layer mounts its own owner-only routes here (app/extension_hooks.py)
     import mail_backend
     server_mail = mail_backend.configure(cfg)
     mail_backend.ACCOUNTS = None
+    ctx.mail_backend, ctx.server_mail = mail_backend, server_mail
+    extension_hooks.call("before_mail", app, cfg, ctx)   # a layer may add routes to the mail router before it is mounted
     if cfg.mail_user_accounts:                          # every signed-in person may connect their own mailbox
         import mail_accounts
         from users import UserStore

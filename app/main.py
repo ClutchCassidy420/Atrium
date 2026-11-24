@@ -29,6 +29,7 @@ import chat_model
 import themes as themesmod
 from pages import load_pages
 from pagesmount import mount_owner_pages
+import extension_hooks
 from users import UserStore
 
 COOKIE = "__Host-app_session"        # the "__Host-" prefix needs a Secure cookie, i.e. HTTPS (the normal case)
@@ -65,6 +66,7 @@ def make_app(cfg: configmod.Config | None = None, hermes: Hermes | None = None, 
     instance_static = (cfg.instance_dir / "static").resolve()
     theme_file = cfg.instance_dir / "theme.css"
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+    extension_hooks.call("on_app", app, cfg)             # a private layer may add its own routes here (app/extension_hooks.py)
 
     # ---- helpers ---------------------------------------------------------------------------------------------
     def client_address(request: Request) -> str:

@@ -17,6 +17,8 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import extension_hooks
+
 # What each role may do. "*" means everything. Pages name the permission they need. An instance can change these.
 DEFAULT_ROLES = {
     "owner": ["*"],
@@ -114,6 +116,7 @@ def load(env: dict | None = None) -> Config:
     cfg.instance_dir = Path(e.get("INSTANCE_DIR", str(cfg.instance_dir)))
 
     f = cfg.instance_dir / "instance.toml"
+    data: dict = {}
     if f.is_file():
         data = tomllib.loads(f.read_text(encoding="utf-8"))
         cfg.accordion_nav = data.get("accordion_nav") is True
@@ -132,6 +135,7 @@ def load(env: dict | None = None) -> Config:
         if isinstance(data.get("roles"), dict):
             cfg.roles = {str(k): [str(p) for p in v] for k, v in data["roles"].items()}
         cfg.bootstrap_user = str(data.get("bootstrap_user", cfg.bootstrap_user))
+    extension_hooks.call("read_settings", cfg, data)            # a private layer reads its own keys from instance.toml (app/extension_hooks.py)
 
     if e.get("TRUSTED_PROXIES"):
         cfg.trusted_proxies = _split(e["TRUSTED_PROXIES"])

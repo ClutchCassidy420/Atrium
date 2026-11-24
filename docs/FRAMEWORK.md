@@ -173,6 +173,32 @@ the rest of the vault stays read-only. A job's "last answer" is read from its ou
 
 Settings > Connections (owners only) lists Hermes's MCP catalog. Tools that need an API key take it in a form. Tools that sign in with OAuth show a **Sign in** button: Atrium asks Hermes to start the flow (`POST /api/mcp/servers/<name>/auth`, installing the entry first if needed), opens the provider's page in a new tab and watches the flow until Hermes reports it approved, then lists the tools. Hermes does the whole exchange and keeps the token; no code or token passes through Atrium, and Atrium only ever passes on an `https` sign-in address. The provider redirects the browser to Hermes's own callback (`<HERMES_DASHBOARD_PUBLIC_URL>/api/mcp/oauth/callback/<name>`), so that address must be reachable from the owner's browser. Entries that need an app registered with the provider first (they declare `required_env`), or that need local setup, stay blocked with a note. Needs a Hermes whose dashboard has the OAuth flow routes (v0.23 has them); older ones answer that the operation is unavailable.
 
+## Extensions (a private layer without patches)
+
+A downstream layer that adds its own settings, routes or mail routes should not patch Atrium's files, because every Atrium update then has to be hand-merged. Instead the layer ships one file, `app/extensions/<name>/extension.py` (its own folder next to its other modules, never part of Atrium). Atrium loads every such file at start, in folder-name order, and calls whichever of these functions it defines (`app/extension_hooks.py` has the details):
+
+| Hook | When | What it gets |
+|---|---|---|
+| `read_settings(cfg, data)` | while settings are read | the parsed `instance.toml` (`{}` if none); set your own attributes on `cfg` |
+| `on_app(app, cfg)` | right after the web app is created | the app |
+| `mount_pages(app, cfg, ctx)` | while the owner pages' routes are mounted (after Files and Calendar, before Email) | `ctx.guard` (the owner-only dependency), `ctx.hermes`, `ctx.current`, `ctx.same_origin` |
+| `before_mail(app, cfg, ctx)` | just before the Email routes are mounted | the same, plus `ctx.mail_backend` and `ctx.server_mail` (is a server-wide mailbox configured) |
+
+A hook that raises stops Atrium from starting with that error, so a layer's own code failing is loud rather than a silently missing feature. With no extensions installed Atrium does nothing extra. Example:
+
+```python
+# app/extensions/mine/extension.py
+from fastapi import Depends
+
+def read_settings(cfg, data):
+    cfg.my_switch = data.get("my_switch") is True
+
+def mount_pages(app, cfg, ctx):
+    if cfg.my_switch:
+        from extensions.mine import backend
+        app.include_router(backend.router, prefix="/api/mine", dependencies=[Depends(ctx.guard)])
+```
+
 ## One design for everyone
 
 All colors, radius and fonts are CSS variables in `static/tokens.css`. Every page uses those variables and nothing else. An install may
