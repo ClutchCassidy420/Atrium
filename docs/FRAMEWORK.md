@@ -3,6 +3,10 @@
 Atrium is a small web app that gives people a private front end for an AI agent. It is the same for everyone. What makes one
 install different from another lives in a separate **instance** folder, never in this code.
 
+![How Hermes, Atrium and installs fit together: Hermes is the agent, Atrium is the shared web app on top of it, and each install is Atrium plus its own settings and an optional private layer](architecture.svg)
+
+Hermes is the agent and stays a separate program. Atrium calls it (never the other way round). Every install runs the same Atrium code; an install's settings, theme, logins and any private layer live outside this repository and plug in through the extension hooks (see Extensions below).
+
 ## The two layers
 
 | Layer | What it holds | Where |
