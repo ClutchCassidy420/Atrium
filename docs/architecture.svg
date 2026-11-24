@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 520" width="680" height="520" role="img" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">
+  <title>How Hermes, Atrium and installs fit together</title>
+  <desc>Hermes is the agent. Atrium, the shared web app, sits on it and calls it. Each install is Atrium plus its own settings and an optional private layer that plugs in through the extension hooks.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M2 1L8 5L2 9" fill="none" stroke="#444441" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+  </defs>
+  <rect width="680" height="520" fill="#ffffff"/>
+
+  <rect x="190" y="30" width="300" height="56" rx="8" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.8"/>
+  <text x="340" y="52" text-anchor="middle" font-size="14" font-weight="500" fill="#2C2C2A">Hermes</text>
+  <text x="340" y="70" text-anchor="middle" font-size="12" fill="#5F5E5A">The agent. Atrium calls it.</text>
+
+  <line x1="340" y1="88" x2="340" y2="128" stroke="#444441" stroke-width="1.5" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+
+  <rect x="40" y="132" width="600" height="168" rx="16" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.8"/>
+  <text x="340" y="158" text-anchor="middle" font-size="14" font-weight="500" fill="#0C447C">Atrium</text>
+  <text x="340" y="176" text-anchor="middle" font-size="12" fill="#185FA5">Shared web app: same code for everyone</text>
+
+  <rect x="65" y="192" width="170" height="44" rx="8" fill="#ffffff" stroke="#85B7EB" stroke-width="0.8"/>
+  <text x="150" y="219" text-anchor="middle" font-size="14" fill="#042C53">Chat and pages</text>
+  <rect x="255" y="192" width="170" height="44" rx="8" fill="#ffffff" stroke="#85B7EB" stroke-width="0.8"/>
+  <text x="340" y="219" text-anchor="middle" font-size="14" fill="#042C53">Email and Files</text>
+  <rect x="445" y="192" width="170" height="44" rx="8" fill="#ffffff" stroke="#85B7EB" stroke-width="0.8"/>
+  <text x="530" y="219" text-anchor="middle" font-size="14" fill="#042C53">Settings and safety</text>
+
+  <rect x="65" y="248" width="550" height="38" rx="8" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.8"/>
+  <text x="340" y="272" text-anchor="middle" font-size="14" font-weight="500" fill="#2C2C2A">Extension hooks: where a private layer plugs in</text>
+
+  <line x1="185" y1="302" x2="185" y2="350" stroke="#444441" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="495" y1="302" x2="495" y2="350" stroke="#444441" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <rect x="40" y="354" width="290" height="126" rx="12" fill="#EEEDFE" stroke="#534AB7" stroke-width="0.8"/>
+  <text x="185" y="380" text-anchor="middle" font-size="14" font-weight="500" fill="#3C3489">An install with a private layer</text>
+  <text x="185" y="404" text-anchor="middle" font-size="12" fill="#534AB7">Atrium plus the layer's own files</text>
+  <text x="185" y="424" text-anchor="middle" font-size="12" fill="#534AB7">Its own pages, routes and settings</text>
+  <text x="185" y="444" text-anchor="middle" font-size="12" fill="#534AB7">Its own Hermes and logins</text>
+
+  <rect x="350" y="354" width="290" height="126" rx="12" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.8"/>
+  <text x="495" y="380" text-anchor="middle" font-size="14" font-weight="500" fill="#2C2C2A">Other installs</text>
+  <text x="495" y="404" text-anchor="middle" font-size="12" fill="#5F5E5A">Atrium plus their own settings</text>
+  <text x="495" y="424" text-anchor="middle" font-size="12" fill="#5F5E5A">Their own Hermes and logins</text>
+  <text x="495" y="444" text-anchor="middle" font-size="12" fill="#5F5E5A">A private layer, if they want one</text>
+</svg>
