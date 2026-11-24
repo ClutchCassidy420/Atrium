@@ -447,14 +447,22 @@ class SendIn(BaseModel):
 
 
 @router.get("/status")
-async def status():
+async def status(request: Request = None):        # the default keeps an install's own tests that call status() directly working
     own = ACCOUNT.get()
-    if own is None and not (SERVER_OK.get() and server_configured()):         # signed in, but no mailbox yet
-        return {"connected": False, "account": None, "user_accounts": ACCOUNTS is not None, "features": [],
+    server_ok = bool(SERVER_OK.get() and server_configured())
+    mine = []
+    who = getattr(getattr(request, "state", None), "who", None)
+    if ACCOUNTS is not None and who:
+        mine = await asyncio.to_thread(ACCOUNTS.list, who["user"])
+    choices = ([{"id": "server", "address": CFG.mail_address, "kind": "server"}] if server_ok else []) +         [{"id": a["id"], "address": a["address"], "kind": "personal"} for a in mine]
+    if own is None and not server_ok:                                          # signed in, but no mailbox to work on
+        return {"connected": False, "account": None, "accounts": choices, "user_accounts": ACCOUNTS is not None, "features": [],
                 "presets": [{"id": p["id"], "label": p["label"], "hint": p["hint"]} for p in ma.PRESETS]}
     c = own or CFG
-    return {"connected": True, "account": "personal" if own is not None else "server", "address": c.mail_address, "webmail": c.mail_webmail_url,
-            "features": sorted(FEATURES), "user_accounts": ACCOUNTS is not None}
+    return {"connected": True, "account": "personal" if own is not None else "server", "active": getattr(own, "account_id", "") if own is not None else "server",
+            "accounts": choices, "address": c.mail_address, "webmail": c.mail_webmail_url,
+            "features": sorted(FEATURES) if own is None else [], "user_accounts": ACCOUNTS is not None, "max_accounts": ma.MAX_ACCOUNTS,
+            "presets": [{"id": p["id"], "label": p["label"], "hint": p["hint"]} for p in ma.PRESETS]}
 
 
 @router.get("/folders")
@@ -713,14 +721,12 @@ def _test_login(c) -> None:
 @router.get("/account")
 async def account(request: Request):
     user = _me(request)
-    return {"personal": await asyncio.to_thread(ACCOUNTS.info, user), "server": bool(SERVER_OK.get() and server_configured())}
+    return {"accounts": await asyncio.to_thread(ACCOUNTS.list, user), "server": bool(SERVER_OK.get() and server_configured()), "max": ma.MAX_ACCOUNTS}
 
 
 @router.put("/account")
 async def connect_account(request: Request):
     user = _me(request)
-    if SERVER_OK.get() and server_configured():
-        raise HTTPException(status_code=409, detail="This install already gives you the server's mailbox.")
     raw = bytearray()
     async for chunk in request.stream():                     # parsed by hand so a validation message can never echo the password back
         raw.extend(chunk)
@@ -736,16 +742,24 @@ async def connect_account(request: Request):
     def work():
         try:
             c = ACCOUNTS.build(body.address, body.password, body.preset, body.imap_host, body.smtp_host)
+            if any(a["address"].lower() == c.mail_address.lower() for a in ACCOUNTS.list(user)):
+                raise ma.AccountError("That address is already connected.")
+            if len(ACCOUNTS.list(user)) >= ma.MAX_ACCOUNTS:
+                raise ma.AccountError("You can connect up to %d mailboxes. Disconnect one first." % ma.MAX_ACCOUNTS)
         except ma.AccountError as error:
             raise HTTPException(status_code=400, detail=str(error)) from None
         _test_login(c)
-        ACCOUNTS.save(user, c)
-        return ACCOUNTS.info(user)
-    return {"personal": await asyncio.to_thread(work)}
+        try:
+            new_id = ACCOUNTS.save(user, c)
+        except ma.AccountError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from None
+        return next(a for a in ACCOUNTS.list(user) if a["id"] == new_id)
+    return {"account": await asyncio.to_thread(work)}
 
 
-@router.delete("/account")
-async def disconnect_account(request: Request):
+@router.delete("/account/{account_id}")
+async def disconnect_account(account_id: str, request: Request):
     user = _me(request)
-    await asyncio.to_thread(ACCOUNTS.delete, user)
+    if not await asyncio.to_thread(ACCOUNTS.delete, user, account_id):
+        raise HTTPException(status_code=404, detail="That mailbox is not connected.")
     return {"ok": True}

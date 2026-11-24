@@ -85,7 +85,7 @@ def test_the_password_is_encrypted_bound_to_the_person_and_never_listed(tmp_path
     store.save("Bob", s)
     text = store.path.read_text()
     assert SECRET not in text and "93.184.216.34" not in text
-    info = store.info("bob")
+    info = store.list("bob")[0]
     assert info["address"] == "Bob@Gmail.com" and SECRET not in json.dumps(info) and "sealed" not in info
     back = store.settings("bob", resolver=pub)
     assert back.mail_token == SECRET and back.mail_imap_tls_server_name == "imap.gmail.com" and back.personal is True
@@ -94,7 +94,7 @@ def test_the_password_is_encrypted_bound_to_the_person_and_never_listed(tmp_path
     store.path.write_text(json.dumps(data))
     with pytest.raises(ma.AccountError, match="Connect your email again"):
         store.settings("carol", resolver=pub)
-    assert store.info("nobody") is None and store.settings("nobody", resolver=pub) is None
+    assert store.list("nobody") == [] and store.settings("nobody", resolver=pub) is None
 
 
 @pytest.mark.skipif(os.name == "nt", reason="needs real file permissions")
@@ -125,8 +125,9 @@ def test_delete_purge_and_the_attempt_limit(tmp_path):
     store = ma.Accounts(tmp_path)
     for u in ("bob", "carol", "dave"):
         store.save(u, store.build(u + "@gmail.com", SECRET, preset="gmail", resolver=pub))
-    assert store.delete("bob") and not store.delete("bob") and store.info("bob") is None
-    assert store.purge(["Carol"]) == 1 and store.info("carol") and store.info("dave") is None
+    bob_id = store.list("bob")[0]["id"]
+    assert store.delete("bob", bob_id) and not store.delete("bob", bob_id) and store.list("bob") == []
+    assert store.purge(["Carol"]) == 1 and store.list("carol") and store.list("dave") == []
     assert [store.allow_attempt("bob") for _ in range(ma.ATTEMPTS + 2)] == [True] * ma.ATTEMPTS + [False] * 2
     assert store.allow_attempt("carol")
 
@@ -181,7 +182,7 @@ def test_a_person_connects_their_own_mailbox_and_only_that_one_is_used(mailapp):
     assert s["connected"] is False and s["account"] is None and s["user_accounts"] is True and [p["id"] for p in s["presets"]][0] == "gmail"
     assert c.get(API + "/folders").status_code == 409 and "Connect your email" in c.get(API + "/folders").json()["detail"]
     r = connect(c)
-    assert r.status_code == 200 and r.json()["personal"]["address"] == "bob@gmail.com" and SECRET not in r.text
+    assert r.status_code == 200 and r.json()["account"]["address"] == "bob@gmail.com" and SECRET not in r.text
     assert c.seen.logins == [("bob@gmail.com", "imap.gmail.com", "smtp.gmail.com", SECRET)]
     s = c.get(API + "/status").json()
     assert s["connected"] and s["account"] == "personal" and s["address"] == "bob@gmail.com" and SECRET not in json.dumps(s)
@@ -192,7 +193,8 @@ def test_a_person_connects_their_own_mailbox_and_only_that_one_is_used(mailapp):
     as_(c, "alice", PW, "10.9.0.3")                                                   # not even an owner without a server mailbox
     assert c.get(API + "/status").json()["connected"] is False
     as_(c, "bob", PW2, "10.9.0.4")
-    assert c.delete(API + "/account", headers=H).json() == {"ok": True}
+    bob_id = c.get(API + "/account").json()["accounts"][0]["id"]
+    assert c.delete(API + "/account/" + bob_id, headers=H).json() == {"ok": True}
     assert c.get(API + "/status").json()["connected"] is False
     assert "bob" not in json.loads((c.cfg.data_dir / "mail-accounts.json").read_text())
 
@@ -237,20 +239,113 @@ def test_only_signed_in_people_from_this_site_may_connect(mailapp):
     assert connect(c).status_code == 401 and c.get(API + "/status").status_code == 401
     as_(c, "bob", PW2, "10.9.4.1")
     assert c.put(API + "/account", headers={"origin": "https://other.test"}, json={"address": "a@b.com", "password": "x"}).status_code == 403
-    assert c.delete(API + "/account", headers={"origin": "https://other.test"}).status_code == 403
+    assert c.delete(API + "/account/ab12cd34", headers={"origin": "https://other.test"}).status_code == 403
 
 
-def test_an_owner_keeps_the_server_mailbox_and_people_still_need_their_own(mailapp):
+def test_an_owner_keeps_the_server_mailbox_by_default_and_may_add_their_own_next_to_it(mailapp):
     c = mailapp(server=True)
     as_(c, "alice", PW, "10.9.5.1")
     s = c.get(API + "/status").json()
-    assert s["connected"] and s["account"] == "server" and s["address"] == "owner@server.test"
+    assert s["connected"] and s["account"] == "server" and s["active"] == "server" and s["address"] == "owner@server.test"
+    assert [a["id"] for a in s["accounts"]] == ["server"]
     assert c.get(API + "/folders").json()["address"] == "owner@server.test"
-    assert connect(c).status_code == 409                                              # no second mailbox for an owner who has the server's
+    r = connect(c, address="alice@gmail.com")
+    assert r.status_code == 200
+    mine = r.json()["account"]["id"]
+    s = c.get(API + "/status").json()
+    assert s["account"] == "server" and [a["id"] for a in s["accounts"]] == ["server", mine]          # still opens on the server mailbox
+    assert c.get(API + "/folders?account=" + mine).json()["address"] == "alice@gmail.com"
+    s = c.get(API + "/status?account=" + mine).json()
+    assert s["account"] == "personal" and s["active"] == mine and s["address"] == "alice@gmail.com" and s["features"] == []
+    assert c.get(API + "/folders?account=server").json()["address"] == "owner@server.test"
     as_(c, "bob", PW2, "10.9.5.2")
-    assert c.get(API + "/status").json()["connected"] is False                         # the server mailbox is never offered to anyone else
+    assert c.get(API + "/status").json()["connected"] is False                                      # the server mailbox is never offered to anyone else
+    assert c.get(API + "/status").json()["accounts"] == []
     assert c.get(API + "/folders").status_code == 409
+    assert c.get(API + "/folders?account=server").status_code == 403                                # nor reachable by asking for it
     assert connect(c).status_code == 200 and c.get(API + "/folders").json()["address"] == "bob@gmail.com"
+    assert c.get(API + "/folders?account=" + mine).status_code == 404                               # nor can they open the owner's personal one
+
+
+def test_a_person_can_keep_several_mailboxes_switch_between_them_and_never_see_anyone_elses(mailapp):
+    c = mailapp()
+    as_(c, "bob", PW2, "10.9.7.1")
+    addresses = ("bob@gmail.com", "bob.work@fastmail.com", "bob.old@yahoo.com")
+    ids = []
+    for address in addresses:
+        r = connect(c, address=address, preset="gmail")
+        assert r.status_code == 200, address
+        ids.append(r.json()["account"]["id"])
+    assert len(set(ids)) == 3
+    s = c.get(API + "/status").json()
+    assert s["active"] == ids[0] and [a["address"] for a in s["accounts"]] == list(addresses)
+    for i, address in zip(ids, addresses):                                                          # each request names its mailbox
+        assert c.get(API + "/folders?account=" + i).json()["address"] == address
+        assert c.get(API + "/status?account=" + i).json()["address"] == address
+    assert c.get(API + "/folders").json()["address"] == "bob@gmail.com"                              # no choice: the first one
+    dup = connect(c, address="BOB@gmail.com")                                                       # the same address twice
+    assert dup.status_code == 400 and "already connected" in dup.json()["detail"]
+    for n in range(2):
+        assert connect(c, address="more%d@gmail.com" % n).status_code == 200
+    r = connect(c, address="onetoomany@gmail.com")
+    assert r.status_code == 400 and "up to %d" % ma.MAX_ACCOUNTS in r.json()["detail"]
+    assert c.delete(API + "/account/" + ids[1], headers=H).json() == {"ok": True}
+    assert ids[1] not in [a["id"] for a in c.get(API + "/status").json()["accounts"]]
+    assert c.get(API + "/folders?account=" + ids[1]).status_code == 404
+    assert c.delete(API + "/account/" + ids[1], headers=H).status_code == 404
+    as_(c, "carol", PW2, "10.9.7.2")                                                                # other people's ids open nothing
+    assert connect(c, address="carol@gmail.com").status_code == 200
+    for i in ids:
+        assert c.get(API + "/folders?account=" + i).status_code == 404
+        assert c.delete(API + "/account/" + i, headers=H).status_code == 404
+    assert [a["address"] for a in c.get(API + "/status").json()["accounts"]] == ["carol@gmail.com"]
+    assert SECRET not in json.dumps(c.get(API + "/account").json())
+
+
+def test_a_person_saved_before_there_could_be_several_keeps_their_mailbox(tmp_path):
+    store = ma.Accounts(tmp_path)
+    s = store.build("old@gmail.com", SECRET, preset="gmail", resolver=pub)
+    store.path.write_text(json.dumps({"olduser": {"address": s.mail_address, "preset": "gmail", "imap_host": "imap.gmail.com", "smtp_host": "smtp.gmail.com",
+                                                   "sealed": store._seal("olduser", s.mail_address, SECRET), "created": 1}}))
+    legacy = store.list("olduser")
+    assert [a["address"] for a in legacy] == ["old@gmail.com"] and legacy[0]["id"]
+    assert store.settings("olduser", resolver=pub).mail_token == SECRET
+    assert store.settings("olduser", legacy[0]["id"], resolver=pub).mail_address == "old@gmail.com"
+    store.save("olduser", store.build("new@gmail.com", SECRET, preset="gmail", resolver=pub))          # saving rewrites it in the new shape
+    assert "accounts" in json.loads(store.path.read_text())["olduser"]
+    assert [a["address"] for a in store.list("olduser")] == ["old@gmail.com", "new@gmail.com"]
+    assert store.settings("olduser", store.list("olduser")[0]["id"], resolver=pub).mail_token == SECRET
+    with pytest.raises(ma.NoSuchAccount):
+        store.settings("olduser", "nope1234", resolver=pub)
+    with pytest.raises(ma.NoSuchAccount):
+        store.settings("nobody", "nope1234", resolver=pub)
+
+
+def test_a_legacy_login_moves_to_the_settings_key_too(tmp_path):
+    store = ma.Accounts(tmp_path)
+    store.path.write_text(json.dumps({"olduser": {"address": "old@gmail.com", "preset": "gmail", "imap_host": "imap.gmail.com", "smtp_host": "smtp.gmail.com",
+                                                   "sealed": store._seal("olduser", "old@gmail.com", SECRET), "created": 1}}))
+    assert store.keyfile.exists() or store.settings("olduser", resolver=pub)                         # the key file exists once it has been used
+    new = ma.Accounts(tmp_path, "q" * 48)
+    assert new.migrate() == 1 and not new.keyfile.exists()
+    assert new.settings("olduser", resolver=pub).mail_token == SECRET
+
+
+def test_the_picker_cannot_point_a_route_an_install_adds_at_a_personal_mailbox(mailapp):
+    c = mailapp()
+    store = ma.Accounts(c.cfg.data_dir)
+    store.save("alice", store.build("alice@gmail.com", SECRET, preset="gmail", resolver=pub))
+    mine = store.list("alice")[0]["id"]
+    guard = pagesmount.mail_guard(c.cfg, lambda r: r.who, lambda r: True, store)
+
+    async def run():
+        req = SimpleNamespace(who={"user": "alice", "role": "owner"}, url=SimpleNamespace(path=API + "/messages/5/spam"), method="POST",
+                              state=SimpleNamespace(), query_params={"account": mine})
+        mb.ACCOUNT.set(None)
+        await guard(req)
+        return mb.ACCOUNT.get(), mb.SERVER_OK.get()
+    own, server_ok = asyncio.run(run())
+    assert own is None and server_ok is True                                                         # it still acts on the server mailbox, never the picked one
 
 
 def test_other_routes_an_install_adds_stay_owner_only(mailapp):
@@ -258,7 +353,7 @@ def test_other_routes_an_install_adds_stay_owner_only(mailapp):
     guard = pagesmount.mail_guard(c.cfg, lambda r: r.who, lambda r: True, ma.Accounts(c.cfg.data_dir))
 
     def ask(role, path, method="GET"):
-        req = SimpleNamespace(who={"user": "x", "role": role}, url=SimpleNamespace(path=API + path), method=method, state=SimpleNamespace())
+        req = SimpleNamespace(who={"user": "x", "role": role}, url=SimpleNamespace(path=API + path), method=method, state=SimpleNamespace(), query_params={})
         try:
             asyncio.run(guard(req))
             return 200
@@ -266,13 +361,13 @@ def test_other_routes_an_install_adds_stay_owner_only(mailapp):
             return e.status_code
     allowed = [("GET", "/status"), ("GET", "/folders"), ("GET", "/messages"), ("GET", "/messages/5"), ("GET", "/messages/5/attachment/1"),
                ("POST", "/messages/5/flags"), ("POST", "/messages/5/move"), ("DELETE", "/messages/5"), ("POST", "/send"),
-               ("GET", "/account"), ("PUT", "/account"), ("DELETE", "/account"), ("HEAD", "/status")]
+               ("GET", "/account"), ("PUT", "/account"), ("DELETE", "/account/ab12cd34"), ("HEAD", "/status")]
     for method, path in allowed:
         assert ask("user", path, method) == 200, (method, path)
     # a route an install adds, even one that starts like a core route (the block list acts on the server-wide mailbox), is owner-only
     denied = [("POST", "/messages/5/spam"), ("GET", "/messages/5/spam"), ("POST", "/blocklist/add"), ("GET", "/block"), ("GET", "/admin"),
               ("POST", "/messages/5/flags/x"), ("GET", "/messages/abc"), ("GET", "/messages/5/"), ("GET", "/status/"), ("DELETE", "/send"),
-              ("GET", "/send"), ("POST", "/status"), ("PUT", "/messages/5"), ("POST", "/account/x"), ("GET", "/messages/5/attachment/x"),
+              ("GET", "/send"), ("POST", "/status"), ("PUT", "/messages/5"), ("POST", "/account/x"), ("DELETE", "/account"), ("DELETE", "/account/"), ("DELETE", "/account/AB12CD34"), ("DELETE", "/account/ab12cd34/x"), ("GET", "/messages/5/attachment/x"),
               ("POST", "/messages"), ("GET", ""), ("GET", "/")]
     for method, path in denied:
         assert ask("user", path, method) == 403, (method, path)
@@ -298,7 +393,7 @@ def test_a_removed_person_loses_their_saved_sign_in_at_startup(make, tmp_path):
     store.save("ghost", store.build("ghost@gmail.com", SECRET, preset="gmail", resolver=pub))
     c = configmod.Config(data_dir=data, instance_dir=tmp_path / "instance", trusted_proxies=["testclient"], mail_user_accounts=True)
     make(users=(("alice", "owner", PW),), config=c)
-    assert ma.Accounts(data).info("ghost") is None
+    assert ma.Accounts(data).list("ghost") == []
     mb.ACCOUNTS = None
 
 
@@ -350,7 +445,7 @@ def test_a_migration_that_cannot_open_every_login_changes_nothing(tmp_path):
     old.save("bob", old.build("bob@gmail.com", SECRET, preset="gmail", resolver=pub))
     old.save("carol", old.build("carol@gmail.com", SECRET, preset="gmail", resolver=pub))
     data = json.loads(old.path.read_text())
-    data["carol"]["sealed"] = data["bob"]["sealed"]                     # bound to bob, so it does not open for carol
+    data["carol"]["accounts"][0]["sealed"] = data["bob"]["accounts"][0]["sealed"]       # bound to bob, so it does not open for carol
     old.path.write_text(json.dumps(data))
     before = old.path.read_text()
     new = ma.Accounts(tmp_path, KEY)

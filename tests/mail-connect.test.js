@@ -1,4 +1,4 @@
-// Email pages with personal mailboxes: the connect form, a failed connect, a connected mailbox, and Disconnect. Synthetic only (no network).
+// Email pages with personal mailboxes: the connect form, several mailboxes with a switcher, Disconnect, and the owner's view. Synthetic only (no network).
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -30,28 +30,50 @@ function setValue(w, el, value) {
   Object.getOwnPropertyDescriptor(proto, "value").set.call(el, value);
   el.dispatchEvent(new w.Event(el.tagName === "SELECT" ? "change" : "input", { bubbles: true }));
 }
+const submit = w => w.document.querySelector("form").dispatchEvent(new w.Event("submit", { bubbles: true, cancelable: true }));
 
-(async () => {
-  let connected = false, fail = false;
+// a tiny fake of the server: the mailboxes saved so far, and which one a request names
+function fake({ server = false } = {}) {
+  const mine = [];
+  let nextId = 1, fail = false;
+  const state = { mine, setFail: v => { fail = v; } };
   const handler = async (url, o) => {
-    if (url === "/api/mail/status") return connected ? { connected: true, account: "personal", address: "bob@gmail.com", webmail: "", features: [], user_accounts: true } : { connected: false, account: null, user_accounts: true, features: [], presets: PRESETS };
-    if (url === "/api/mail/account" && o.method === "PUT") { if (fail) throw new Error('502: {"detail":"The mail server did not accept the sign-in."}'); connected = true; return { personal: { address: "bob@gmail.com" } }; }
-    if (url === "/api/mail/account" && o.method === "DELETE") { connected = false; return { ok: true }; }
-    if (url === "/api/mail/folders") return { folders: [{ name: "INBOX", role: "inbox", total: 0, unseen: 0 }], address: "bob@gmail.com" };
-    if (url.startsWith("/api/mail/messages")) return { items: [], total: 0, page: 0, pages: 1 };
+    const [pathPart, query = ""] = url.split("?");
+    const picked = new URLSearchParams(query).get("account") || "";
+    const choices = (server ? [{ id: "server", address: "owner@server.test", kind: "server" }] : []).concat(mine.map(a => ({ id: a.id, address: a.address, kind: "personal" })));
+    if (pathPart === "/api/mail/status") {
+      const active = picked && choices.some(c => c.id === picked) ? picked : (choices[0] || {}).id;
+      if (picked && !choices.some(c => c.id === picked)) throw new Error('404: {"detail":"That mailbox is not connected."}');
+      if (!active) return { connected: false, account: null, accounts: [], user_accounts: true, features: [], presets: PRESETS };
+      const c = choices.find(x => x.id === active);
+      return { connected: true, account: c.kind, active, accounts: choices, address: c.address, webmail: "", features: c.kind === "server" ? ["blocklist"] : [], user_accounts: true, max_accounts: 5, presets: PRESETS };
+    }
+    if (pathPart === "/api/mail/account" && o.method === "PUT") {
+      if (fail) throw new Error('502: {"detail":"The mail server did not accept the sign-in."}');
+      const body = JSON.parse(o.body);
+      const a = { id: "m" + nextId++, address: body.address };
+      mine.push(a);
+      return { account: a };
+    }
+    if (pathPart.startsWith("/api/mail/account/") && o.method === "DELETE") { const i = mine.findIndex(a => a.id === pathPart.split("/").pop()); mine.splice(i, 1); return { ok: true }; }
+    if (pathPart === "/api/mail/folders") return { folders: [{ name: "INBOX", role: "inbox", total: 0, unseen: 0 }], address: (choices.find(c => c.id === (picked || (choices[0] || {}).id)) || {}).address };
+    if (pathPart.startsWith("/api/mail/messages")) return { items: [], total: 0, page: 0, pages: 1 };
     return {};
   };
+  return { handler, state };
+}
+
+(async () => {
+  const { handler, state } = fake();
   const { w, calls } = await open(handler);
   const $ = s => w.document.querySelector(s);
   const text = () => w.document.body.textContent;
 
-  // nobody connected yet: the form, with the provider's hint and no server fields
+  // nobody connected yet: the form, with the provider's hint and no server fields; no Cancel on the first one
   assert.match(text(), /Connect your email/);
   assert.match(text(), /Create an App password in your Google Account/);
-  assert.ok(!/Incoming server/.test(text()));
+  assert.ok(!/Incoming server/.test(text()) && !btn(w, /^Cancel$/));
   assert.equal($("input[type=password]").autocomplete, "off");
-
-  // choosing Other asks for the two servers
   setValue(w, $("select"), "");
   await settle(40);
   assert.match(text(), /Incoming server \(IMAP\)/);
@@ -59,34 +81,75 @@ function setValue(w, el, value) {
   setValue(w, $("select"), "gmail");
   await settle(40);
 
-  // a refused sign-in shows the reason, keeps the form, and sends nothing but the typed fields
-  fail = true;
+  // a refused sign-in shows the reason and keeps the form
+  state.setFail(true);
   setValue(w, $("input[type=email]"), "bob@gmail.com");
   setValue(w, $("input[type=password]"), "app-pass-123");
-  w.document.querySelector("form").dispatchEvent(new w.Event("submit", { bubbles: true, cancelable: true }));
+  submit(w);
   await settle(120);
   assert.match(text(), /did not accept the sign-in/);
   assert.match(text(), /Connect your email/);
   assert.deepEqual(calls.find(c => c[0] === "PUT").slice(1), ["/api/mail/account", { address: "bob@gmail.com", password: "app-pass-123", preset: "gmail" }]);
 
-  // a good one switches to the mailbox, which says whose it is and offers Disconnect
-  fail = false;
-  w.document.querySelector("form").dispatchEvent(new w.Event("submit", { bubbles: true, cancelable: true }));
-  await settle(250);
+  // a good one opens the mailbox, which says whose it is, and offers Add another and Disconnect
+  state.setFail(false);
+  submit(w);
+  await settle(300);
   assert.ok(!/Connect your email/.test(text()), "the form is gone");
   assert.match(text(), /Signed in as bob@gmail\.com/);
-  assert.ok(btn(w, /^Disconnect$/));
+  assert.ok(btn(w, /Add another mailbox/) && btn(w, /^Disconnect$/));
+  assert.ok(!$("select[aria-label=Mailbox]"), "one mailbox needs no switcher");
+  assert.ok(calls.some(c => c[1].startsWith("/api/mail/folders?account=m1")), "requests name the open mailbox");
 
-  // disconnecting returns to the form
+  // adding another: the form comes back with Cancel, and Cancel returns to the mailbox
+  click(w, btn(w, /Add another mailbox/));
+  await settle(80);
+  assert.match(text(), /Add another mailbox/);
+  click(w, btn(w, /^Cancel$/));
+  await settle(300);
+  assert.match(text(), /Signed in as bob@gmail\.com/);
+  click(w, btn(w, /Add another mailbox/));
+  await settle(80);
+  setValue(w, $("input[type=email]"), "bob.work@fastmail.com");
+  setValue(w, $("input[type=password]"), "second-pass");
+  submit(w);
+  await settle(350);
+  const sw = $("select[aria-label=Mailbox]");
+  assert.ok(sw, "two mailboxes get a switcher");
+  assert.deepEqual([...sw.options].map(o => o.textContent), ["bob@gmail.com", "bob.work@fastmail.com"]);
+  assert.equal(sw.value, "m2", "the new one is open");
+  assert.ok(calls.some(c => c[1].startsWith("/api/mail/folders?account=m2")));
+
+  // switching reloads the other mailbox
+  setValue(w, $("select[aria-label=Mailbox]"), "m1");
+  await settle(350);
+  assert.equal($("select[aria-label=Mailbox]").value, "m1");
+  assert.equal(calls.filter(c => c[1].startsWith("/api/mail/folders?account=m1")).length >= 2, true);
+
+  // disconnecting the open one removes only that one
   click(w, btn(w, /^Disconnect$/));
-  await settle(250);
-  assert.deepEqual(calls.filter(c => c[0] === "DELETE").map(c => c[1]), ["/api/mail/account"]);
-  assert.match(text(), /Connect your email/);
+  await settle(350);
+  assert.deepEqual(calls.filter(c => c[0] === "DELETE").map(c => c[1]), ["/api/mail/account/m1"]);
+  assert.match(text(), /Signed in as bob\.work@fastmail\.com/);
+  click(w, btn(w, /^Disconnect$/));
+  await settle(350);
+  assert.match(text(), /Connect your email/);                                  // none left: back to the first form
 
-  // the server-wide mailbox (an owner's) shows no Disconnect and no form
-  const owner = await open(async (url, o) => url === "/api/mail/status" ? { connected: true, account: "server", address: "owner@server.test", webmail: "", features: [], user_accounts: true } : handler(url, o));
-  assert.match(owner.w.document.body.textContent, /Signed in as owner@server\.test/);
-  assert.ok(!btn(owner.w, /^Disconnect$/));
+  // an owner opens on the server mailbox, can add personal ones next to it, and only the server one shows the block menu
+  const owner = fake({ server: true });
+  const o = await open(owner.handler);
+  assert.match(o.w.document.body.textContent, /Signed in as owner@server\.test/);
+  assert.ok(!o.w.document.querySelector("select[aria-label=Mailbox]") && !btn(o.w, /^Disconnect$/), "the server mailbox has no Disconnect");
+  assert.ok(btn(o.w, /Add another mailbox/));
+  click(o.w, btn(o.w, /Add another mailbox/));
+  await settle(80);
+  setValue(o.w, o.w.document.querySelector("input[type=email]"), "owner@gmail.com");
+  setValue(o.w, o.w.document.querySelector("input[type=password]"), "pass-for-gmail");
+  o.w.document.querySelector("form").dispatchEvent(new o.w.Event("submit", { bubbles: true, cancelable: true }));
+  await settle(350);
+  const osw = o.w.document.querySelector("select[aria-label=Mailbox]");
+  assert.deepEqual([...osw.options].map(x => x.textContent), ["Server mailbox: owner@server.test", "owner@gmail.com"]);
+  assert.ok(btn(o.w, /^Disconnect$/), "a personal mailbox can be disconnected");
 
   console.log("mail-connect tests passed");
   process.exit(0);

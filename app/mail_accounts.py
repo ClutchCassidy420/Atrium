@@ -30,7 +30,7 @@ from agentkit import atomic_write_text
 IMAP_PORT = 993                       # implicit TLS only, like the server-wide mailbox
 SMTP_PORT = 465
 MAX_PASSWORD = 512
-ATTEMPTS = 6                          # connection attempts per person per window
+ATTEMPTS = 10                         # connection attempts per person per window
 WINDOW = 600
 
 # Providers that offer app passwords and implicit-TLS SMTP. (Outlook.com and iCloud only offer SMTP with STARTTLS, and Microsoft turns off
@@ -53,6 +53,7 @@ _ADDRESS = re.compile(r"^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]{1,64}@(?=.{4,253}$)(?:[
 
 
 MIN_KEY_CHARS = 32
+MAX_ACCOUNTS = 5                      # mailboxes one person may connect
 
 
 def derive_key(secret: str) -> bytes:
@@ -66,6 +67,10 @@ def derive_key(secret: str) -> bytes:
 
 class AccountError(Exception):
     """A problem the person can fix; the message is safe to show."""
+
+
+class NoSuchAccount(AccountError):
+    """The mailbox asked for is not one of this person's."""
 
 
 def clean_host(value) -> str:
@@ -170,15 +175,16 @@ class Accounts:
             return 0
         with self._lock:
             data = self._load()
-            moved = {}
+            resealed = {}
             for user, rec in data.items():
+                accounts = self._accounts_of(rec)
                 try:
-                    moved[user] = self._seal(user, rec["address"], self._open(user, rec["address"], rec["sealed"], old), self._env_key)
+                    resealed[user] = [dict(a, sealed=self._seal(user, a["address"], self._open(user, a["address"], a["sealed"], old), self._env_key)) for a in accounts]
                 except Exception:
                     return 0
-            for user, sealed in moved.items():
-                data[user]["sealed"] = sealed
-            if moved:
+            for user, accounts in resealed.items():
+                data[user] = {"accounts": accounts}
+            if resealed:
                 self._save(data)
         try:
             with open(self.keyfile, "r+b") as fh:
@@ -191,28 +197,47 @@ class Accounts:
             self.keyfile.unlink()
         except OSError:
             pass
-        return len(moved)
+        return sum(len(a) for a in resealed.values())
 
     # -- the accounts ----------------------------------------------------------------------------------------------
-    def info(self, user: str) -> Optional[dict]:
-        """What the page may know: never the password."""
-        rec = self._load().get(user.lower())
+    # Each person has a list of mailboxes ({"bob": {"accounts": [...]}}). A person saved before there could be several has one record in the old
+    # shape ({"bob": {"address": ...}}); it is read as a list of one and written back in the new shape the next time anything is saved.
+    @staticmethod
+    def _accounts_of(rec) -> list:
         if not isinstance(rec, dict):
-            return None
-        return {"address": rec.get("address", ""), "preset": rec.get("preset", ""), "imap_host": rec.get("imap_host", ""),
-                "smtp_host": rec.get("smtp_host", ""), "created": rec.get("created", 0)}
+            return []
+        if isinstance(rec.get("accounts"), list):
+            return [a for a in rec["accounts"] if isinstance(a, dict) and a.get("address") and a.get("sealed")]
+        if rec.get("address") and rec.get("sealed"):
+            return [dict(rec, id=rec.get("id") or "primary00")]
+        return []
 
-    def settings(self, user: str, resolver=None) -> Optional[SimpleNamespace]:
-        """Connection settings in the shape the mail backend reads, with each host replaced by its checked public address."""
-        rec = self._load().get(user.lower())
-        if not isinstance(rec, dict):
+    @staticmethod
+    def _public(a: dict) -> dict:
+        return {"id": a.get("id", ""), "address": a.get("address", ""), "preset": a.get("preset", ""), "imap_host": a.get("imap_host", ""),
+                "smtp_host": a.get("smtp_host", ""), "created": a.get("created", 0)}
+
+    def list(self, user: str) -> list:
+        """What the page may know about a person's mailboxes: never the passwords."""
+        return [self._public(a) for a in self._accounts_of(self._load().get(user.lower()))]
+
+    def settings(self, user: str, account_id: str = "", resolver=None) -> Optional[SimpleNamespace]:
+        """Connection settings in the shape the mail backend reads, with each host replaced by its checked public address. Without an id: the
+        person's first mailbox. None when they have none; AccountError for an id that is not theirs."""
+        accounts = self._accounts_of(self._load().get(user.lower()))
+        if not accounts:
+            if account_id:
+                raise NoSuchAccount("That mailbox is not connected.")
             return None
+        rec = next((a for a in accounts if a.get("id") == account_id), None) if account_id else accounts[0]
+        if rec is None:
+            raise NoSuchAccount("That mailbox is not connected.")
         try:
             password = self._open(user.lower(), rec["address"], rec["sealed"])
         except Exception:
             raise AccountError("Your saved email sign-in could not be read. Connect your email again.") from None
         return SimpleNamespace(
-            mail_address=rec["address"], mail_token=password,
+            mail_address=rec["address"], mail_token=password, account_id=rec.get("id", ""),
             mail_imap_host=(resolver or resolve_public)(rec["imap_host"], IMAP_PORT), mail_imap_port=IMAP_PORT, mail_imap_tls_server_name=rec["imap_host"],
             mail_smtp_host=(resolver or resolve_public)(rec["smtp_host"], SMTP_PORT), mail_smtp_port=SMTP_PORT, mail_smtp_tls_server_name=rec["smtp_host"],
             mail_webmail_url="", personal=True)
@@ -235,21 +260,37 @@ class Accounts:
             mail_smtp_host=(resolver or resolve_public)(smtp_host, SMTP_PORT), mail_smtp_port=SMTP_PORT, mail_smtp_tls_server_name=smtp_host,
             mail_webmail_url="", personal=True, preset=preset)
 
-    def save(self, user: str, s: SimpleNamespace) -> None:
+    def save(self, user: str, s: SimpleNamespace) -> str:
+        """Add one mailbox for a person and return its id. A person may keep up to MAX_ACCOUNTS, one per address."""
         user = user.lower()
         with self._lock:
             data = self._load()
-            data[user] = {"address": s.mail_address, "preset": getattr(s, "preset", ""), "imap_host": s.mail_imap_tls_server_name,
-                          "smtp_host": s.mail_smtp_tls_server_name, "sealed": self._seal(user, s.mail_address, s.mail_token), "created": int(time.time())}
+            accounts = self._accounts_of(data.get(user))
+            if any(a["address"].lower() == s.mail_address.lower() for a in accounts):
+                raise AccountError("That address is already connected.")
+            if len(accounts) >= MAX_ACCOUNTS:
+                raise AccountError("You can connect up to %d mailboxes. Disconnect one first." % MAX_ACCOUNTS)
+            new_id = secrets.token_hex(4)
+            accounts.append({"id": new_id, "address": s.mail_address, "preset": getattr(s, "preset", ""), "imap_host": s.mail_imap_tls_server_name,
+                             "smtp_host": s.mail_smtp_tls_server_name, "sealed": self._seal(user, s.mail_address, s.mail_token), "created": int(time.time())})
+            data[user] = {"accounts": accounts}
             self._save(data)
+            return new_id
 
-    def delete(self, user: str) -> bool:
+    def delete(self, user: str, account_id: str) -> bool:
+        user = user.lower()
         with self._lock:
             data = self._load()
-            gone = data.pop(user.lower(), None) is not None
-            if gone:
-                self._save(data)
-            return gone
+            accounts = self._accounts_of(data.get(user))
+            kept = [a for a in accounts if a.get("id") != account_id]
+            if len(kept) == len(accounts):
+                return False
+            if kept:
+                data[user] = {"accounts": kept}
+            else:
+                data.pop(user, None)
+            self._save(data)
+            return True
 
     def purge(self, keep) -> int:
         """Forget the mailboxes of people who no longer exist."""

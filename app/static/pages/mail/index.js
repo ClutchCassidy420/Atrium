@@ -8,6 +8,8 @@
   if (!SDK || !REG || !UI) return;
   var h = UI.h, useState = SDK.hooks.useState, useEffect = SDK.hooks.useEffect, useRef = SDK.hooks.useRef;
   var API = "/api/mail", JSONH = { "Content-Type": "application/json" };
+  var cur = "";      // which of the person's mailboxes the page works on ("" = the default one); every mail request carries it
+  function U(path) { return API + path + (cur ? (path.indexOf("?") < 0 ? "?" : "&") + "account=" + encodeURIComponent(cur) : ""); }
 
   function errText(e) { var m = String((e && e.message) || e || "Something went wrong"), i = m.indexOf("{"); if (i >= 0) { try { var j = JSON.parse(m.slice(i)); if (j && typeof j.detail === "string") return j.detail; } catch (x) { /* plain */ } } return m.replace(/^\d+:\s*/, ""); }
   function who(a) { return a ? (a.name || a.email || "") : ""; }
@@ -46,7 +48,7 @@
       if (!f.subject.trim() && !window.confirm("Send without a subject?")) return;
       setBusy(true); setMsg("");
       Promise.all(files.map(function (fl) { return fileToB64(fl).then(function (data) { return { name: fl.name, type: fl.type || "application/octet-stream", data: data }; }); })).then(function (atts) {
-        return SDK.fetchJSON(API + "/send", { method: "POST", headers: JSONH, body: JSON.stringify({ to: f.to, cc: f.cc, bcc: f.bcc, subject: f.subject, body: f.body, attachments: atts, submission_id: subId.current, reply_uid: init.reply_uid || null, reply_folder: init.reply_folder || "" }) });
+        return SDK.fetchJSON(U("/send"), { method: "POST", headers: JSONH, body: JSON.stringify({ to: f.to, cc: f.cc, bcc: f.bcc, subject: f.subject, body: f.body, attachments: atts, submission_id: subId.current, reply_uid: init.reply_uid || null, reply_folder: init.reply_folder || "" }) });
       }).then(function () { p.onSent(); }, function (x) { setBusy(false); setMsg(errText(x)); });
     }
     return h("div", { className: "ml-scrim", onMouseDown: function (x) { if (x.target === x.currentTarget && !busy) p.onClose(); } },
@@ -104,7 +106,7 @@
                 h("button", { type: "button", className: "hm-btn hm-btn-ghost", disabled: p.blocking || !targets.domain, onClick: function () { block("domain"); } }, "Block sender’s domain", targets.domain ? h("small", null, targets.domain) : null))),
           h("button", { type: "button", className: "hm-btn hm-btn-ghost ml-del", onClick: p.onDelete }, p.role === "trash" ? "Delete forever" : "Delete"))),
       m.attachments.length ? h("div", { className: "ml-atts" }, m.attachments.map(function (at) {
-        return h("a", { key: at.n, className: "ml-att", href: API + "/messages/" + m.uid + "/attachment/" + at.n + "?folder=" + encodeURIComponent(m.folder), download: at.name }, "📎 " + at.name, h("span", null, size(at.size)));
+        return h("a", { key: at.n, className: "ml-att", href: U("/messages/" + m.uid + "/attachment/" + at.n + "?folder=" + encodeURIComponent(m.folder)), download: at.name }, "📎 " + at.name, h("span", null, size(at.size)));
       })) : null,
       m.blocked_images && !plain ? h("p", { className: "ml-note" }, "Remote images are blocked so the sender cannot see when you read this.") : null,
       h("div", { className: "ml-body-wrap" }, body),
@@ -122,25 +124,25 @@
     var folder = (folders.filter(function (x) { return x.role === role; })[0] || {}).name || (role === "inbox" ? "INBOX" : "");
     var meta = folders.filter(function (x) { return x.name === folder; })[0] || {};
 
-    useEffect(function () { SDK.fetchJSON(API + "/folders").then(function (r) { setFolders(r.folders || []); }, function (x) { setErr(errText(x)); }); }, [tick]);
+    useEffect(function () { SDK.fetchJSON(U("/folders")).then(function (r) { setFolders(r.folders || []); }, function (x) { setErr(errText(x)); }); }, [tick]);
     useEffect(function () {
       if (!folder) return undefined;
       var live = true;
-      SDK.fetchJSON(API + "/messages?folder=" + encodeURIComponent(folder) + "&page=" + page + (query ? "&q=" + encodeURIComponent(query) : "")).then(function (r) { if (live) { setData(r); setErr(""); } }, function (x) { if (live) setErr(errText(x)); });
+      SDK.fetchJSON(U("/messages?folder=" + encodeURIComponent(folder) + "&page=" + page + (query ? "&q=" + encodeURIComponent(query) : ""))).then(function (r) { if (live) { setData(r); setErr(""); } }, function (x) { if (live) setErr(errText(x)); });
       return function () { live = false; };
     }, [folder, page, query, tick]);
     useEffect(function () { var i = setInterval(function () { setTick(function (n) { return n + 1; }); }, 90000); return function () { clearInterval(i); }; }, []);
 
     function open(it) {
       setOpenUid(it.uid); setLoadingMsg(true); setMsg(null);
-      SDK.fetchJSON(API + "/messages/" + it.uid + "?folder=" + encodeURIComponent(folder)).then(function (r) {
+      SDK.fetchJSON(U("/messages/" + it.uid + "?folder=" + encodeURIComponent(folder))).then(function (r) {
         setMsg(r); setLoadingMsg(false);
         if (data) setData(Object.assign({}, data, { items: data.items.map(function (x) { return x.uid === it.uid ? Object.assign({}, x, { seen: true }) : x; }) }));
-        SDK.fetchJSON(API + "/folders").then(function (rr) { setFolders(rr.folders || []); }, function () { /* optional */ });
+        SDK.fetchJSON(U("/folders")).then(function (rr) { setFolders(rr.folders || []); }, function () { /* optional */ });
       }, function (x) { setLoadingMsg(false); setErr(errText(x)); });
     }
     function after(msgText) { setMsg(null); setOpenUid(null); setNote(msgText || ""); setTick(tick + 1); }
-    function api(method, path, body) { return SDK.fetchJSON(API + path, { method: method, headers: JSONH, body: body ? JSON.stringify(body) : undefined }); }
+    function api(method, path, body) { return SDK.fetchJSON(U(path), { method: method, headers: JSONH, body: body ? JSON.stringify(body) : undefined }); }
     function del(uid) { api("DELETE", "/messages/" + uid + "?folder=" + encodeURIComponent(folder)).then(function () { after(role === "trash" ? "Deleted for good." : "Moved to Trash."); }, function (x) { setErr(errText(x)); }); }
     function star(it, ev) { ev.stopPropagation(); api("POST", "/messages/" + it.uid + "/flags", { folder: folder, flagged: !it.flagged }).then(function () { setData(Object.assign({}, data, { items: data.items.map(function (x) { return x.uid === it.uid ? Object.assign({}, x, { flagged: !it.flagged }) : x; }) })); }, function (x) { setErr(errText(x)); }); }
     function junk(uid) {
@@ -190,12 +192,7 @@
           })) : h(window.__APP_UI__.kit.EmptyState, { icon: "📭", title: query ? "Nothing matched “" + query + "”" : "This folder is empty" }),
           data && data.pages > 1 ? h("div", { className: "ml-pager" }, h("button", { type: "button", className: "hm-btn hm-btn-ghost", disabled: page <= 0, onClick: function () { setPage(page - 1); } }, "‹ Newer"), h("span", { className: "hm-sub" }, "Page " + (page + 1) + " of " + data.pages), h("button", { type: "button", className: "hm-btn hm-btn-ghost", disabled: page + 1 >= data.pages, onClick: function () { setPage(page + 1); } }, "Older ›")) : null),
         h("section", { className: "hm-card ml-read" }, h(Reader, { msg: msg, loading: loadingMsg, role: role, canBlock: !!props.canBlock, blocking: blocking, onBlock: blockSpam, onBack: function () { setOpenUid(null); setMsg(null); }, onReply: reply, onForward: forward, onDelete: function () { del(msg.uid); }, onJunk: function () { junk(msg.uid); }, onUnread: function () { unread(msg.uid); } }))),
-      props.address ? h("p", { className: "hm-fine" }, "Signed in as " + props.address + (props.webmail ? " · " : ""), props.webmail ? h("a", { href: props.webmail, target: "_blank", rel: "noopener noreferrer" }, "Open full webmail ↗") : null,
-        props.personal ? h("button", { type: "button", className: "hm-btn hm-btn-ghost", style: { marginLeft: ".6rem" }, onClick: function () {
-          if (window.confirm("Disconnect " + props.address + "? Your saved sign-in is removed from this server. Your mail stays where it is.")) {
-            SDK.fetchJSON(API + "/account", { method: "DELETE" }).then(props.disconnect, function (x) { setErr(errText(x)); });
-          }
-        } }, "Disconnect") : null) : null,
+      props.bar || null,
       compose ? h(Composer, { draft: compose, onClose: function () { setCompose(null); }, onSent: function () { setCompose(null); after("Sent."); } }) : null);
   }
 
@@ -211,12 +208,12 @@
       setBusy(true); setErr("");
       var body = { address: f.address.trim(), password: f.password, preset: f.preset };
       if (!f.preset) { body.imap_host = f.imap_host.trim(); body.smtp_host = f.smtp_host.trim(); }
-      SDK.fetchJSON(API + "/account", { method: "PUT", headers: JSONH, body: JSON.stringify(body) }).then(function () { setF(Object.assign({}, f, { password: "" })); props.done(); },
+      SDK.fetchJSON(API + "/account", { method: "PUT", headers: JSONH, body: JSON.stringify(body) }).then(function (r) { setF(Object.assign({}, f, { password: "" })); props.done(r && r.account ? r.account.id : ""); },
         function (x) { setBusy(false); setErr(errText(x)); });
     }
     return h("div", { className: "ml" }, h("h1", null, "Email"),
       h("form", { className: "hm-card", onSubmit: submit, style: { maxWidth: "34rem", display: "flex", flexDirection: "column", gap: ".8rem" } },
-        h("h2", null, "Connect your email"),
+        h("h2", null, props.adding ? "Add another mailbox" : "Connect your email"),
         h("p", { className: "hm-sub" }, "Read and send from your own mailbox here. Your password is stored encrypted on this server and is never shown again."),
         err ? h(K.Alert, { tone: "danger" }, err) : null,
         h(K.Field, { label: "Provider" }, function (ip) {
@@ -229,17 +226,45 @@
         !f.preset ? h(SDK.React.Fragment, null,
           h(K.Field, { label: "Incoming server (IMAP)", required: true, hint: "A public name such as imap.example.com. Port 993 with TLS is used." }, function (ip) { return h("input", Object.assign({}, ip, { className: "hm-input", type: "text", maxLength: 253, required: true, value: f.imap_host, onChange: function (x) { set("imap_host", x.target.value); } })); }),
           h(K.Field, { label: "Outgoing server (SMTP)", required: true, hint: "A public name such as smtp.example.com. Port 465 with TLS is used." }, function (ip) { return h("input", Object.assign({}, ip, { className: "hm-input", type: "text", maxLength: 253, required: true, value: f.smtp_host, onChange: function (x) { set("smtp_host", x.target.value); } })); })) : null,
-        h("div", null, h(K.Button, { type: "submit", variant: "primary", loading: busy }, "Connect"))));
+        h("div", { style: { display: "flex", gap: ".6rem" } }, h(K.Button, { type: "submit", variant: "primary", loading: busy }, "Connect"),
+          props.onCancel ? h(K.Button, { variant: "ghost", disabled: busy, onClick: props.onCancel }, "Cancel") : null)));
   }
+
+  /* The line under the mailbox: which one is open, a switch between the person's mailboxes, Add another, and Disconnect for a personal one. */
+  function Bar(props) {
+    var st = props.st, accounts = st.accounts || [], max = st.max_accounts || 5, personalCount = accounts.filter(function (a) { return a.kind === "personal"; }).length;
+    return h("p", { className: "hm-fine", style: { display: "flex", gap: ".6rem", alignItems: "center", flexWrap: "wrap" } },
+      accounts.length > 1 ? h("select", { className: "hm-select", "aria-label": "Mailbox", value: st.active, onChange: function (x) { props.onSwitch(x.target.value); } },
+        accounts.map(function (a) { return h("option", { key: a.id, value: a.id }, (a.kind === "server" ? "Server mailbox: " : "") + a.address); })) : h("span", null, "Signed in as " + st.address),
+      st.webmail ? h("a", { href: st.webmail, target: "_blank", rel: "noopener noreferrer" }, "Open full webmail ↗") : null,
+      st.user_accounts && personalCount < max ? h("button", { type: "button", className: "hm-btn hm-btn-ghost", onClick: props.onAdd }, "＋ Add another mailbox") : null,
+      st.account === "personal" ? h("button", { type: "button", className: "hm-btn hm-btn-ghost", onClick: function () {
+        if (window.confirm("Disconnect " + st.address + "? Your saved sign-in is removed from this server. Your mail stays where it is.")) {
+          SDK.fetchJSON(API + "/account/" + encodeURIComponent(st.active), { method: "DELETE" }).then(props.onDisconnect, function (x) { window.alert(errText(x)); });
+        }
+      } }, "Disconnect") : null);
+  }
+
+  function savedChoice() { try { return sessionStorage.getItem("atrium.mail.account") || ""; } catch (x) { return ""; } }
+  function saveChoice(id) { try { sessionStorage.setItem("atrium.mail.account", id || ""); } catch (x) { /* remembering the choice is optional */ } }
 
   function Wrap(role, compose) {
     return function Entry() {
-      var a = useState(null), st = a[0], set = a[1], t = useState(0), n = t[0], setN = t[1];
-      useEffect(function () { SDK.fetchJSON(API + "/status").then(set, function () { set({}); }); }, [n]);
+      var a = useState(null), st = a[0], set = a[1], t = useState(0), n = t[0], setN = t[1], ad = useState(false), adding = ad[0], setAdding = ad[1];
+      useEffect(function () {
+        cur = savedChoice();
+        function load() { SDK.fetchJSON(U("/status")).then(set, function () { if (cur) { cur = ""; saveChoice(""); load(); } else set({}); }); }
+        load();
+      }, [n]);
+      function reload() { setAdding(false); set(null); setN(n + 1); }
+      function switchTo(id) { saveChoice(id); reload(); }
       if (!st) return h("div", { className: "ml" }, h(window.__APP_UI__.kit.Loading, { label: "Loading…" }));
-      if (st.connected === false && st.user_accounts) return h(Connect, { presets: st.presets, done: function () { setN(n + 1); } });
-      return h(Page, { role: role, compose: compose, address: st.address, webmail: st.webmail, canBlock: (st.features || []).indexOf("blocklist") >= 0,
-        personal: st.account === "personal", disconnect: function () { setN(n + 1); } });
+      if ((st.connected === false && st.user_accounts) || adding) {
+        return h(Connect, { presets: st.presets, adding: adding, onCancel: adding ? function () { setAdding(false); } : null, done: function (id) { if (id) saveChoice(id); reload(); } });
+      }
+      cur = st.active || "";
+      return h(Page, { key: st.active || "x", role: role, compose: compose, address: st.address, webmail: st.webmail, canBlock: (st.features || []).indexOf("blocklist") >= 0,
+        bar: st.address ? h(Bar, { st: st, onSwitch: switchTo, onAdd: function () { setAdding(true); }, onDisconnect: function () { saveChoice(""); reload(); } }) : null });
     };
   }
   REG.register("mail-inbox", Wrap("inbox"));
