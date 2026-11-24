@@ -31,7 +31,8 @@ _MSG = r"/messages/\d+"
 PERSONAL_MAIL_ROUTES = tuple((method, re.compile(pattern)) for method, pattern in (
     ("GET", r"/status"), ("GET", r"/folders"), ("GET", r"/messages"), ("GET", _MSG), ("GET", _MSG + r"/attachment/\d+"),
     ("POST", _MSG + r"/flags"), ("POST", _MSG + r"/move"), ("DELETE", _MSG), ("POST", r"/send"),
-    ("GET", r"/account"), ("PUT", r"/account"), ("DELETE", r"/account/[a-z0-9]{4,16}")))
+    ("GET", r"/account"), ("PUT", r"/account"), ("DELETE", r"/account/[a-z0-9]{4,16}"),
+    ("GET", r"/safe-senders"), ("POST", r"/safe-senders"), ("DELETE", r"/safe-senders")))
 
 
 def personal_mail_route(method: str, path: str) -> bool:
@@ -118,6 +119,11 @@ def mount_owner_pages(app, cfg, hermes, current, same_origin) -> None:
     import mail_backend
     server_mail = mail_backend.configure(cfg)
     mail_backend.ACCOUNTS = None
+    import mail_images
+    from users import UserStore
+    mail_backend.SAFE = mail_images.SafeSenders(cfg.data_dir)         # senders each person always sees images from
+    mail_backend.SIGNER = mail_images.Signer(cfg.data_dir)            # signs the links a message uses for the images it shows
+    mail_backend.SAFE.purge([u["username"] for u in UserStore(cfg.data_dir / "users.json").all()])
     ctx.mail_backend, ctx.server_mail = mail_backend, server_mail
     extension_hooks.call("before_mail", app, cfg, ctx)   # a layer may add routes to the mail router before it is mounted
     if cfg.mail_user_accounts:                          # every signed-in person may connect their own mailbox
@@ -130,6 +136,8 @@ def mount_owner_pages(app, cfg, hermes, current, same_origin) -> None:
         app.include_router(mail_backend.router, prefix="/api/mail", dependencies=[Depends(mail_guard(cfg, current, same_origin, store))])
     elif server_mail:                                   # otherwise Email exists only when a server-wide mailbox is configured, for owners
         app.include_router(mail_backend.router, prefix="/api/mail", dependencies=[Depends(guard)])
+    if cfg.mail_user_accounts or server_mail:           # the signed links a message uses for its images (no session: the link proves the right)
+        app.include_router(mail_backend.image_router, prefix="/api/mail-image")
     pipeline_backend.configure(cfg, hermes, app)
     app.include_router(pipeline_backend.router, prefix="/api/pipeline", dependencies=[Depends(guard)])
 

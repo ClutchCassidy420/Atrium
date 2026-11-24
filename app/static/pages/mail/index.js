@@ -108,7 +108,14 @@
       m.attachments.length ? h("div", { className: "ml-atts" }, m.attachments.map(function (at) {
         return h("a", { key: at.n, className: "ml-att", href: U("/messages/" + m.uid + "/attachment/" + at.n + "?folder=" + encodeURIComponent(m.folder)), download: at.name }, "📎 " + at.name, h("span", null, size(at.size)));
       })) : null,
-      m.blocked_images && !plain ? h("p", { className: "ml-note" }, "Remote images are blocked so the sender cannot see when you read this.") : null,
+      m.blocked_images && !plain ? h("div", { className: "ml-note ml-images", style: { display: "flex", flexWrap: "wrap", gap: ".5rem", alignItems: "center" } },
+        h("span", null, "Images are blocked so the sender cannot see when you read this."),
+        h("button", { type: "button", className: "hm-btn hm-btn-ghost", onClick: p.onShowImages }, "Show images"),
+        m.sender_email ? h("button", { type: "button", className: "hm-btn hm-btn-ghost", title: "Always show images in mail from " + m.sender_email, onClick: p.onAlwaysImages }, "Always show from " + m.sender_email) : null) : null,
+      m.images_shown && !plain ? h("div", { className: "ml-note ml-images", style: { display: "flex", flexWrap: "wrap", gap: ".5rem", alignItems: "center" } },
+        h("span", null, m.safe_sender ? "Images from " + m.sender_email + " are always shown." : "Images are loaded through this server, so the sender does not see your address, but may see that the message was opened."),
+        m.safe_sender ? h("button", { type: "button", className: "hm-btn hm-btn-ghost", onClick: p.onStopImages }, "Stop showing images from this sender")
+          : m.sender_email ? h("button", { type: "button", className: "hm-btn hm-btn-ghost", title: "Always show images in mail from " + m.sender_email, onClick: p.onAlwaysImages }, "Always show from " + m.sender_email) : null) : null,
       h("div", { className: "ml-body-wrap" }, body),
       m.html ? h("p", { className: "ml-toggle" }, h("button", { type: "button", className: "ml-link", onClick: function () { setPlain(!plain); } }, plain ? "Show formatted" : "Show plain text")) : null);
   }
@@ -133,9 +140,9 @@
     }, [folder, page, query, tick]);
     useEffect(function () { var i = setInterval(function () { setTick(function (n) { return n + 1; }); }, 90000); return function () { clearInterval(i); }; }, []);
 
-    function open(it) {
+    function open(it, images) {
       setOpenUid(it.uid); setLoadingMsg(true); setMsg(null);
-      SDK.fetchJSON(U("/messages/" + it.uid + "?folder=" + encodeURIComponent(folder))).then(function (r) {
+      SDK.fetchJSON(U("/messages/" + it.uid + "?folder=" + encodeURIComponent(folder) + (images ? "&images=1" : ""))).then(function (r) {
         setMsg(r); setLoadingMsg(false);
         if (data) setData(Object.assign({}, data, { items: data.items.map(function (x) { return x.uid === it.uid ? Object.assign({}, x, { seen: true }) : x; }) }));
         SDK.fetchJSON(U("/folders")).then(function (rr) { setFolders(rr.folders || []); }, function () { /* optional */ });
@@ -191,7 +198,10 @@
               h("button", { type: "button", className: "ml-star" + (it.flagged ? " ml-on" : ""), "aria-label": it.flagged ? "Remove star" : "Star", onClick: function (ev) { star(it, ev); } }, it.flagged ? "★" : "☆"));
           })) : h(window.__APP_UI__.kit.EmptyState, { icon: "📭", title: query ? "Nothing matched “" + query + "”" : "This folder is empty" }),
           data && data.pages > 1 ? h("div", { className: "ml-pager" }, h("button", { type: "button", className: "hm-btn hm-btn-ghost", disabled: page <= 0, onClick: function () { setPage(page - 1); } }, "‹ Newer"), h("span", { className: "hm-sub" }, "Page " + (page + 1) + " of " + data.pages), h("button", { type: "button", className: "hm-btn hm-btn-ghost", disabled: page + 1 >= data.pages, onClick: function () { setPage(page + 1); } }, "Older ›")) : null),
-        h("section", { className: "hm-card ml-read" }, h(Reader, { msg: msg, loading: loadingMsg, role: role, canBlock: !!props.canBlock, blocking: blocking, onBlock: blockSpam, onBack: function () { setOpenUid(null); setMsg(null); }, onReply: reply, onForward: forward, onDelete: function () { del(msg.uid); }, onJunk: function () { junk(msg.uid); }, onUnread: function () { unread(msg.uid); } }))),
+        h("section", { className: "hm-card ml-read" }, h(Reader, { msg: msg, loading: loadingMsg, role: role, canBlock: !!props.canBlock, blocking: blocking, onBlock: blockSpam, onBack: function () { setOpenUid(null); setMsg(null); }, onReply: reply, onForward: forward, onDelete: function () { del(msg.uid); }, onJunk: function () { junk(msg.uid); }, onUnread: function () { unread(msg.uid); },
+          onShowImages: function () { open({ uid: msg.uid }, true); },
+          onAlwaysImages: function () { api("POST", "/safe-senders", { address: msg.sender_email }).then(function () { open({ uid: msg.uid }); }, function (x) { setErr(errText(x)); }); },
+          onStopImages: function () { api("DELETE", "/safe-senders?address=" + encodeURIComponent(msg.sender_email)).then(function () { open({ uid: msg.uid }); }, function (x) { setErr(errText(x)); }); } }))),
       props.bar || null,
       compose ? h(Composer, { draft: compose, onClose: function () { setCompose(null); }, onSent: function () { setCompose(null); after("Sent."); } }) : null);
   }
