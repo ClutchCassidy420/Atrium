@@ -115,6 +115,9 @@ def mount_owner_pages(app, cfg, hermes, current, same_origin) -> None:
     if nextcloud_backend.configure(cfg):                 # Files and Calendar exist only when a Nextcloud is configured
         app.include_router(nextcloud_backend.router, prefix="/api/nextcloud", dependencies=[Depends(guard)])
     ctx = SimpleNamespace(guard=guard, hermes=hermes, current=current, same_origin=same_origin, mail_backend=None, server_mail=False)
+    if cfg.rea_url and cfg.rea_token:                    # the REA workbench page exists only when its container is set up; owners only
+        import rea_backend
+        app.include_router(rea_backend.rea_router(cfg, current, same_origin), prefix="/api/rea")
     import media_backend, media_servers
     from users import UserStore as _Users
     media_store = media_servers.Servers(cfg.data_dir, cfg.mail_accounts_key)

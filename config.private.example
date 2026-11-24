@@ -28,6 +28,8 @@ MAIL_SMTP_TLS_SERVER_NAME=  # the name on the server's certificate, if MAIL_SMTP
 MAIL_WEBMAIL_URL=           # optional: the full webmail, for an "Open webmail" link
 MAIL_USER_ACCOUNTS=         # 1 = every signed-in person connects their own mailbox (an app password) on the Email pages; off by default
 MAIL_ACCOUNTS_KEY=          # with the line above: 32+ random characters that encrypt those saved logins, so a copy of the data folder opens nothing. Make one with: python -c "import secrets; print(secrets.token_urlsafe(48))"
+REA_URL=                    # the REA workbench container (see rea-sidecar/), for example http://172.31.1.10:9100; the REA page appears only when this and REA_TOKEN are set
+REA_TOKEN=                  # the secret shared with that container (32+ random characters)
 MEDIA_ALLOW_PRIVATE=        # 1 = owners (only) may connect a Jellyfin or Emby server on the local network (http, IP address, one-word name) on the Media page; off by default
 
 # Files and Calendar (optional: shown only when these are set; WebDAV and CalDAV on a Nextcloud server)
