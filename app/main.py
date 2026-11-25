@@ -38,7 +38,7 @@ HERE = Path(__file__).parent
 STATIC = (HERE / "static").resolve()
 # a valid hash of nothing in particular: checked when a username does not exist, so a wrong name and a wrong
 # password take the same time
-_DUMMY_HASH = hash_password("not-a-real-password", n=2 ** 12)
+_DUMMY_HASH = hash_password("not-a-real-password")      # same cost as a real hash, or the response time would reveal which usernames exist
 
 
 def make_app(cfg: configmod.Config | None = None, hermes: Hermes | None = None, secure_cookie: bool = True) -> FastAPI:
@@ -176,6 +176,10 @@ def make_app(cfg: configmod.Config | None = None, hermes: Hermes | None = None, 
         # allowed because the terminal library sets them (styles cannot run code).
         resp.headers["Content-Security-Policy"] = ("default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' blob:; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; "
                                                    "frame-ancestors 'none'; form-action 'self'; base-uri 'none'")
+        resp.headers["Permissions-Policy"] = "camera=(), geolocation=(), payment=(), usb=()"
+        resp.headers["Cross-Origin-Opener-Policy"] = "same-origin"
+        if secure_cookie:                                     # HTTPS installs only; plain-HTTP local development must not pin a browser to HTTPS
+            resp.headers["Strict-Transport-Security"] = "max-age=31536000"
         if not request.url.path.startswith(("/static/", "/instance/")):
             resp.headers["Cache-Control"] = "no-store"
         return resp
