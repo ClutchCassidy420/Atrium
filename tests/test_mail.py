@@ -73,6 +73,14 @@ def use(monkeypatch, box):
     return box
 
 
+@pytest.fixture(autouse=True)
+def _no_kept_connections():
+    """Kept IMAP connections must never leak from one test into the next."""
+    mb._clear_pool()
+    yield
+    mb._clear_pool()
+
+
 @pytest.fixture()
 def mailcfg(tmp_path):
     c = SimpleNamespace(mail_address="me@example.test", mail_token="tok", mail_imap_host="imap.example.test", mail_imap_port=993,
@@ -389,3 +397,105 @@ def test_a_failing_read_hook_never_stops_a_message_from_opening(monkeypatch, mai
         assert mb._read("INBOX", 7)["subject"] == "hi"
     finally:
         mb.READ_HOOKS.remove(boom)
+
+
+# ---------------------------------------------------------------- kept connections
+
+class Counting:
+    """A stand-in IMAP connection that counts how often the app connects, signs in, pings and signs out."""
+    made, logins, logouts, pings = 0, 0, 0, 0
+    ping_ok = True
+
+    def __init__(self, *a, **k):
+        type(self).made += 1
+        self.capabilities = ("IMAP4REV1",)
+
+    def login(self, user, token):
+        type(self).logins += 1
+        return "OK", []
+
+    def _get_capabilities(self):
+        pass
+
+    def noop(self):
+        type(self).pings += 1
+        if not type(self).ping_ok:
+            raise OSError("connection reset")
+        return "OK", []
+
+    def logout(self):
+        type(self).logouts += 1
+        return "BYE", []
+
+
+@pytest.fixture()
+def counting(mailcfg, monkeypatch):
+    class Fake(Counting):
+        made = logins = logouts = pings = 0
+        ping_ok = True
+    monkeypatch.setattr(mb, "_VerifiedIMAP4SSL", Fake)
+    monkeypatch.setattr(mb, "RECHECK_S", 0)             # ping every kept connection, so the tests need no waiting
+    return Fake
+
+
+def test_a_finished_connection_is_reused_by_the_next_request(counting):
+    for _ in range(3):
+        with mb._imap():
+            pass
+    assert (counting.made, counting.logins, counting.logouts) == (1, 1, 0)
+    assert counting.pings == 2                           # checked each time it was taken back out
+
+
+def test_a_connection_the_server_dropped_is_replaced_not_used(counting):
+    with mb._imap():
+        pass
+    counting.ping_ok = False
+    with mb._imap():
+        pass
+    assert counting.made == 2 and counting.logouts == 1  # the dead one was closed, a fresh one signed in
+
+
+def test_a_connection_is_not_kept_after_an_error(counting):
+    with pytest.raises(mb.HTTPException):
+        with mb._imap():
+            raise imaplib.IMAP4.error("refused")
+    with pytest.raises(RuntimeError):
+        with mb._imap():
+            raise RuntimeError("something else")
+    with mb._imap():
+        pass
+    assert counting.made == 3 and counting.logouts == 2
+
+
+def test_connections_are_kept_per_mailbox_and_per_password(counting, mailcfg):
+    with mb._imap():
+        pass
+    mailcfg.mail_token = "changed"                       # a changed password must never be answered by the old sign-in
+    with mb._imap():
+        pass
+    assert counting.made == 2
+    mailcfg.mail_address = "other@example.test"
+    with mb._imap():
+        pass
+    assert counting.made == 3
+
+
+def test_only_a_few_idle_connections_are_kept_and_old_ones_are_closed(counting, monkeypatch):
+    first, second, third = mb._imap(), mb._imap(), mb._imap()     # three requests at once each get their own
+    for ctx in (first, second, third):
+        ctx.__enter__()
+    for ctx in (first, second, third):
+        ctx.__exit__(None, None, None)
+    assert counting.made == 3 and counting.logouts == 1  # MAX_IDLE is 2: the third is closed
+    monkeypatch.setattr(mb, "IDLE_TTL_S", -1)            # everything kept is now too old
+    with mb._imap():
+        pass
+    assert counting.made == 4 and counting.logouts == 3
+
+
+def test_turning_reuse_off_signs_out_every_time(counting, monkeypatch):
+    monkeypatch.setattr(mb, "MAX_IDLE", 0)
+    for _ in range(2):
+        with mb._imap():
+            pass
+    assert (counting.made, counting.logouts) == (2, 2)
