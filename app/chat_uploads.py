@@ -28,12 +28,30 @@ router = APIRouter(route_class=AgentRoute)
 # reads text: no macros, no OCR, nothing inside the document is ever run.
 
 MAX_DOC_BYTES = 50 * 1024 * 1024
+MAX_USER_BYTES = 2 * 1024 * 1024 * 1024        # what one person may keep in total (uploads plus kept documents)
 _DOC_EXTS = {".pdf", ".docx", ".xlsx", ".pptx", ".csv", ".tsv", ".txt", ".md", ".json", ".log"}
 
 
 def _doc_dirs() -> tuple[Path, Path]:
     base = _hermes_home() / "atrium"
     return base / "uploads", base / "kept-docs"
+
+
+def _own_dir(base: Path, user: str) -> Path:
+    """One folder per person inside the uploads and kept-docs folders, so nobody can move or fill up someone else's files."""
+    return base / re.sub(r"[^a-z0-9._-]", "_", (user or "").lower())
+
+
+def _used_bytes(user: str) -> int:
+    total = 0
+    for base in _doc_dirs():
+        try:
+            for p in _own_dir(base, user).iterdir():
+                if p.is_file() and not p.is_symlink():
+                    total += p.stat().st_size
+        except OSError:
+            continue
+    return total
 
 
 def _safe_name(name: str) -> str:
@@ -48,15 +66,20 @@ def _purge_old_uploads(days: int = 30) -> int:
     cutoff = time.time() - days * 86400
     removed = 0
     try:
-        for p in folder.iterdir():
-            try:
-                if p.is_file() and not p.is_symlink() and p.stat().st_mtime < cutoff:
-                    p.unlink()
-                    removed += 1
-            except OSError:
-                continue
+        spots = [folder] + [d for d in folder.iterdir() if d.is_dir() and not d.is_symlink()]    # the folder itself (older uploads) and each person's folder
     except OSError:
-        pass
+        return 0
+    for spot in spots:
+        try:
+            for p in spot.iterdir():
+                try:
+                    if p.is_file() and not p.is_symlink() and p.stat().st_mtime < cutoff:
+                        p.unlink()
+                        removed += 1
+                except OSError:
+                    continue
+        except OSError:
+            continue
     return removed
 
 
@@ -70,7 +93,11 @@ async def doc_upload(request: Request, name: str, keep: int = 0) -> dict:
     declared = request.headers.get("content-length")
     if declared and declared.isdigit() and int(declared) > MAX_DOC_BYTES + 4096:
         raise HTTPException(status_code=413, detail="That file is over 50 MB.")
-    folder = _doc_dirs()[1 if keep else 0]
+    user = request.state.who["user"]
+    used = await asyncio.to_thread(_used_bytes, user)
+    if used + (int(declared) if declared and declared.isdigit() else 0) > MAX_USER_BYTES:
+        raise HTTPException(status_code=413, detail="You have reached your storage limit for documents. Remove some kept documents first.")
+    folder = _own_dir(_doc_dirs()[1 if keep else 0], user)
     folder.mkdir(parents=True, exist_ok=True)
     stamp = time.strftime("%Y%m%d-%H%M%S")
     target = folder / ("%s-%s-%s" % (stamp, os.urandom(3).hex(), clean))
@@ -81,6 +108,8 @@ async def doc_upload(request: Request, name: str, keep: int = 0) -> dict:
                 size += len(chunk)
                 if size > MAX_DOC_BYTES:
                     raise HTTPException(status_code=413, detail="That file is over 50 MB.")
+                if used + size > MAX_USER_BYTES:
+                    raise HTTPException(status_code=413, detail="You have reached your storage limit for documents. Remove some kept documents first.")
                 fh.write(chunk)
         if size == 0:
             raise HTTPException(status_code=400, detail="That file is empty.")
@@ -113,9 +142,10 @@ class DocMoveBody(BaseModel):
 
 
 @router.post("/doc/move")
-async def doc_move(body: DocMoveBody) -> dict:
-    """Switch an uploaded document between 'just for this chat' (auto-removed) and 'keep'. Only files this plugin stored."""
-    chat_dir, kept_dir = (d.resolve() for d in _doc_dirs())
+async def doc_move(body: DocMoveBody, request: Request) -> dict:
+    """Switch an uploaded document between 'just for this chat' (auto-removed) and 'keep'. Only the person's own files."""
+    user = request.state.who["user"]
+    chat_dir, kept_dir = (_own_dir(d, user).resolve() for d in _doc_dirs())
     try:
         src = Path(body.path).resolve()
     except (OSError, ValueError, RuntimeError):
