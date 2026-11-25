@@ -26,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import email
+import hashlib
 import imaplib
 import logging
 import re
@@ -33,6 +34,7 @@ import smtplib
 import socket
 import sqlite3
 import ssl
+import threading
 import time
 from contextlib import closing, contextmanager
 from contextvars import ContextVar
@@ -141,9 +143,81 @@ def _refresh_caps(m) -> None:
         pass                                  # keep what the greeting said
 
 
-@contextmanager
-def _imap():
-    c = _cfg()
+# --- reused connections --------------------------------------------------------------------------------------------
+# Every mail action used to open a new TLS connection, sign in and sign out. A finished connection that is still healthy is now kept for
+# a short while and handed to the next request for the same mailbox, so a page that makes several calls in a row (list, open, mark read,
+# move) pays for one handshake and one sign-in. One request owns a connection at a time (imaplib is not thread-safe). A connection is kept
+# only when the request ended cleanly; after any error it is closed. A kept connection that has been idle a few seconds is pinged first and
+# replaced with a fresh one if the server has dropped it. Set MAX_IDLE to 0 to turn this off.
+IDLE_TTL_S = 45.0          # close a kept connection that has not been used for this long
+RECHECK_S = 3.0            # ping a kept connection that has been idle longer than this before using it
+MAX_IDLE = 2               # kept connections per mailbox
+_POOL: dict = {}           # mailbox key -> [(time it was put back, connection)]
+_POOL_LOCK = threading.Lock()
+
+
+def _pool_key(c) -> tuple:
+    token = hashlib.sha256(str(c.mail_token).encode("utf-8")).hexdigest()[:16]
+    return (c.mail_imap_host, c.mail_imap_port, c.mail_imap_tls_server_name or c.mail_imap_host, c.mail_address, token)
+
+
+def _close(m) -> None:
+    try:
+        m.logout()
+    except Exception:
+        pass
+
+
+def _take(key):
+    """A kept, working connection for this mailbox, or None. Also closes any that have been idle too long."""
+    now = time.monotonic()
+    expired, found = [], None
+    with _POOL_LOCK:
+        for k in list(_POOL):
+            alive = []
+            for stamp, m in _POOL[k]:
+                (alive if now - stamp <= IDLE_TTL_S else expired).append((stamp, m))
+            if alive:
+                _POOL[k] = alive
+            else:
+                del _POOL[k]
+        if key in _POOL:
+            found = _POOL[key].pop()
+            if not _POOL[key]:
+                del _POOL[key]
+    for _, m in expired:
+        _close(m)
+    if found is None:
+        return None
+    stamp, m = found
+    if now - stamp > RECHECK_S:
+        try:
+            if m.noop()[0] != "OK":
+                raise OSError("not ok")
+        except Exception:
+            _close(m)
+            return None
+    return m
+
+
+def _give(key, m) -> None:
+    with _POOL_LOCK:
+        held = _POOL.setdefault(key, [])
+        if MAX_IDLE > 0 and len(held) < MAX_IDLE:
+            held.append((time.monotonic(), m))
+            return
+    _close(m)
+
+
+def _clear_pool() -> None:
+    with _POOL_LOCK:
+        held = [m for lst in _POOL.values() for _, m in lst]
+        _POOL.clear()
+    for m in held:
+        _close(m)
+
+
+def _open_imap(c):
     try:
         m = _VerifiedIMAP4SSL(
             c.mail_imap_host,
@@ -154,17 +228,29 @@ def _imap():
         m._encoding = "utf-8"
         m.login(c.mail_address, c.mail_token)
         _refresh_caps(m)
+        return m
     except (imaplib.IMAP4.error, OSError, ValueError):
         raise HTTPException(status_code=502, detail="The mail server did not accept the sign-in.")
+
+
+@contextmanager
+def _imap():
+    c = _cfg()
+    key = _pool_key(c)
+    m = _take(key) if MAX_IDLE > 0 else None
+    if m is None:
+        m = _open_imap(c)
+    clean = False
     try:
         yield m
+        clean = True
     except imaplib.IMAP4.error:
         raise HTTPException(status_code=502, detail="The mail server refused that.")
     finally:
-        try:
-            m.logout()
-        except Exception:
-            pass
+        if clean and MAX_IDLE > 0:
+            _give(key, m)
+        else:
+            _close(m)
 
 
 def _dec(v) -> str:
