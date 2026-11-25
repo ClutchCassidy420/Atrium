@@ -18,9 +18,11 @@ rename, move and delete files (Nextcloud keeps deleted files in its own trash).
 """
 from __future__ import annotations
 
+import asyncio
 import re
 import time
 import uuid
+import weakref
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 from urllib.parse import quote, unquote, urlsplit
@@ -49,10 +51,23 @@ def _client() -> httpx.AsyncClient:
     return httpx.AsyncClient(base_url=CFG.nextcloud_url.rstrip("/"), auth=(CFG.nextcloud_user, CFG.nextcloud_password), headers=headers, timeout=30.0, follow_redirects=False)
 
 
+_SHARED: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()     # running event loop -> (what it was built from, client)
+
+
+def _shared() -> httpx.AsyncClient:
+    """One client per event loop for the short DAV calls, so a page that makes several in a row reuses the TLS connection.
+    A client is tied to the loop it was made on, and is rebuilt when the settings change. Uploads and downloads keep their own."""
+    loop = asyncio.get_running_loop()
+    stamp = (CFG.nextcloud_url, CFG.nextcloud_user, CFG.nextcloud_password, CFG.nextcloud_host, _client)
+    held = _SHARED.get(loop)
+    if held is None or held[0] != stamp:
+        held = _SHARED[loop] = (stamp, _client())
+    return held[1]
+
+
 async def _dav(method: str, path: str, body: Optional[str] = None, headers: Optional[dict] = None, ok=(200, 201, 204, 207)) -> httpx.Response:
     try:
-        async with _client() as c:
-            r = await c.request(method, path, content=body.encode("utf-8") if body is not None else None, headers=headers or {})
+        r = await _shared().request(method, path, content=body.encode("utf-8") if body is not None else None, headers=headers or {})
     except httpx.HTTPError:
         raise HTTPException(status_code=502, detail="Nextcloud did not answer.")
     if r.status_code == 401:

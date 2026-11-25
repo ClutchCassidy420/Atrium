@@ -1,5 +1,6 @@
 """Files and Calendar over WebDAV and CalDAV: synthetic tests with a scripted server (no real Nextcloud, no network)."""
 import sys
+from types import SimpleNamespace
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "app"))
@@ -146,3 +147,19 @@ def test_repeating_events_are_not_edited_in_place(dav):
 def test_event_range_is_limited(dav):
     r = dav.get("/api/nextcloud/events", params={"start": "2026-01-01T00:00:00Z", "end": "2027-06-01T00:00:00Z"})
     assert r.status_code == 400
+
+
+def test_short_calls_share_one_client_per_loop_and_rebuild_when_settings_change():
+    import asyncio
+    c = SimpleNamespace(nextcloud_url="https://nc.test", nextcloud_user="u", nextcloud_password="p", nextcloud_host="")
+    nc.CFG = c
+
+    async def two():
+        a, b = nc._shared(), nc._shared()
+        c.nextcloud_password = "changed"
+        return a, b, nc._shared()
+
+    a, b, after = asyncio.run(two())
+    assert a is b and after is not a
+    other_loop = asyncio.run(two())[0]
+    assert other_loop is not a                      # a client is never carried onto another event loop
