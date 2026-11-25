@@ -26,6 +26,7 @@ from overview import Overview
 from chatmount import PREFIX as CHAT_PREFIX, mount_chat
 from code_backend import mount_code
 import chat_model
+import firstrun
 import themes as themesmod
 from pages import load_pages
 from pagesmount import mount_owner_pages
@@ -205,8 +206,12 @@ def make_app(cfg: configmod.Config | None = None, hermes: Hermes | None = None, 
         return serve_from(instance_static, path)
 
     # ---- login ---------------------------------------------------------------------------------------------------
+    first_run = firstrun.mount(app, cfg, users, throttle, page_doc, same_origin, client_address)     # /setup: the first owner, made in the browser
+
     @app.get("/login")
     async def login_get(request: Request):
+        if first_run.open():                      # a brand-new install has nobody to sign in yet
+            return RedirectResponse("/setup", status_code=303)
         return RedirectResponse("/", status_code=303) if current(request) else login_page()
 
     @app.post("/login")

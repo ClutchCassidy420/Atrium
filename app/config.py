@@ -55,6 +55,7 @@ class Config:
     data_dir: Path = Path("/data")           # the app's own writable folder (users, sessions)
     instance_dir: Path = Path("/instance")   # this install's files: instance.toml, theme.css, extra pages
     trusted_proxies: list[str] = field(default_factory=list)   # addresses allowed to tell us the real client address
+    plain_http: bool = False                 # ALLOW_PLAIN_HTTP=1: sign-in cookies without HTTPS, for localhost and a home network only
     roles: dict[str, list[str]] = field(default_factory=lambda: {k: list(v) for k, v in DEFAULT_ROLES.items()})
     pages_disabled: list[str] = field(default_factory=list)    # page ids to hide
     redirects: dict = field(default_factory=dict)              # old address -> current address (links in old notifications and bookmarks keep working)
@@ -143,6 +144,7 @@ def load(env: dict | None = None) -> Config:
     if e.get("TRUSTED_PROXIES"):
         cfg.trusted_proxies = _split(e["TRUSTED_PROXIES"])
     cfg.bootstrap_hash = e.get("OWNER_PASSWORD_HASH", "")
+    cfg.plain_http = e.get("ALLOW_PLAIN_HTTP", "").strip().lower() in ("1", "true", "yes", "on")
     cfg.hermes_api_base = e.get("HERMES_API_BASE", "")
     cfg.hermes_api_key = e.get("HERMES_API_KEY", "")
     cfg.hermes_dashboard_base = e.get("HERMES_DASHBOARD_BASE", "")

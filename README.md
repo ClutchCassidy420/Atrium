@@ -56,12 +56,28 @@ the Room (a model key), Email, Files and Calendar (a mailbox and a Nextcloud), M
 One login system with users and roles. Everything personal about an install (name, brand, pages, theme, secrets) lives in a separate
 **instance folder**, so the same code runs for everyone. See [docs/FRAMEWORK.md](docs/FRAMEWORK.md).
 
-## Install
+## Install (about five minutes)
 
-1. Copy `instance.example/` to a folder of your own and edit `instance.toml` (brand, agent name).
-2. Copy `config.private.example` to `config.private.env` and fill in your Hermes address and keys. Never commit it.
-3. Start from `deploy/compose.example.yaml`. Put the app behind a reverse proxy and keep it on a private network.
-4. Create the first owner with `scripts/manage_users.py` (see the guide).
+You need [Docker](https://docs.docker.com/get-docker/) (Docker Desktop on Windows or Mac, Docker Engine on Linux). Then:
+
+```bash
+git clone https://github.com/ClutchCassidy420/Atrium.git
+cd Atrium
+docker compose up -d --build
+docker compose logs atrium
+```
+
+1. The last command prints a **setup code** (like `K7QH-2MXD`).
+2. Open <http://localhost:8000>. It sends you to a setup page: paste the code and choose your username and password.
+3. Sign in. That's it.
+
+Nothing else to create or edit first. By default the app answers only on this computer.
+
+**Connect your agent:** copy `.env.example` to `.env`, fill in your Hermes address and key, and run `docker compose up -d` again.
+Without an agent the app still starts; the pages that need one say so.
+
+**More:** email, files and calendar, phone notifications, reaching it from other devices, updating, backups and a hardened
+server setup are in [docs/INSTALL.md](docs/INSTALL.md). Want to look around first? Use the [demo](#try-it-in-two-minutes-no-agent-needed).
 
 Read [docs/FRAMEWORK.md](docs/FRAMEWORK.md) before exposing it to anyone. Run `pip install pytest` and then `pytest` to check your copy.
 
