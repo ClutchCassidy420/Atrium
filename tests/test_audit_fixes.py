@@ -194,16 +194,16 @@ def test_approval_records_are_for_owners_when_an_approval_service_is_set_up(make
 # ---------------------------------------------------------------- uploads
 
 def test_the_file_type_check_reads_only_the_start_of_the_file(tmp_path, monkeypatch):
-    import chat_backend
+    import docreader
     big = tmp_path / "big.pdf"
     big.write_bytes(b"NOTAPDF!" + b"x" * 4_000_000)
     monkeypatch.setattr(Path, "read_bytes", lambda self: (_ for _ in ()).throw(AssertionError("the whole file was read")))
     with pytest.raises(ValueError, match="real PDF"):
-        chat_backend._extract(big, ".pdf")
+        docreader.extract(big, ".pdf")
     empty = tmp_path / "empty.pdf"
     empty.write_bytes(b"")
     with pytest.raises(ValueError):
-        chat_backend._extract(empty, ".pdf")
+        docreader.extract(empty, ".pdf")
 
 
 # ---------------------------------------------------------------- the document readers the chat page imports are installed by the requirements

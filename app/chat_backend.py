@@ -15,7 +15,7 @@ Routes (mounted by the Hermes dashboard under /api/plugins/atrium-chat):
   GET  /status                     is the agent API reachable
   POST /send                       start one run inside a chat session (conversation memory comes from the session id)
   POST /doc/upload?name=&keep=     receive a document (PDF, Word, Excel, PowerPoint, big text/CSV, up to 50 MB) and return a preview
-  (voice: GET/POST /voice and POST /speak now live in chat_voice.py)
+  (voice: GET/POST /voice and POST /speak live in chat_voice.py; documents in chat_uploads.py; the approval service in chat_approvals.py)
   GET  /stream/{run_id}            server-sent events for that run (words as they are written, tool activity, the end)
   GET  /runs/{run_id}              run state (used to find approval requests)
   POST /runs/{run_id}/stop         stop a run
@@ -39,13 +39,9 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
-import contextlib
 import json
-import os
 import re
 import time
-import urllib.error
-import urllib.request
 from pathlib import Path
 from typing import Any, AsyncIterator, Literal, Optional
 
@@ -58,7 +54,6 @@ import chat_push
 from chat_push import (B64U_RE, ENDPOINT_RE, GROUPS, MAX_SUBSCRIPTIONS, TIME_RE, held_path, in_quiet, load_prefs, locked,
                        notify, prefs_path, push_state, push_save, spawn, watch_run)
 from chat_push import flush_held, notify_sync  # noqa: F401  (re-exported: the host watcher and the agent's notify command import them from here)
-from docreader import extract as _extract
 from pngicons import draw_badge, draw_icon
 from agentkit import (atomic_write_text, AgentRoute as _AgentRoute, agent_name as _agent_name, api_base as _api_base,
                       api_key as _api_key, call as _call, check_run_id as _check_run_id, hermes_home as _hermes_home,
@@ -181,115 +176,6 @@ async def image(path: str) -> FileResponse:
     ext = target.suffix.lower()
     media = "image/jpeg" if ext in (".jpg", ".jpeg") else "image/" + ext.lstrip(".")
     return FileResponse(str(target), media_type=media, headers={"Cache-Control": "private, max-age=86400", "X-Content-Type-Options": "nosniff"})
-
-
-# --- documents in chat -----------------------------------------------------------------------------------------------
-# A document (PDF, Word, Excel, PowerPoint, or a big text/CSV file) is uploaded here first. The page then sends the agent a
-# short note (name, place, size, pages) and a text preview; she reads the rest with her own tools. The extraction only
-# reads text: no macros, no OCR, nothing inside the document is ever run.
-
-MAX_DOC_BYTES = 50 * 1024 * 1024
-_DOC_EXTS = {".pdf", ".docx", ".xlsx", ".pptx", ".csv", ".tsv", ".txt", ".md", ".json", ".log"}
-
-
-def _doc_dirs() -> tuple[Path, Path]:
-    base = _hermes_home() / "atrium"
-    return base / "uploads", base / "kept-docs"
-
-
-def _safe_name(name: str) -> str:
-    name = os.path.basename((name or "").replace("\\", "/")).strip()
-    name = re.sub(r"[^\w.\- ()&,]", "_", name)[:120].strip(" .")
-    return name or "document"
-
-
-def _purge_old_uploads(days: int = 30) -> int:
-    """Delete chat-only uploads older than `days`. Only regular files directly inside the uploads folder are touched."""
-    folder = _doc_dirs()[0]
-    cutoff = time.time() - days * 86400
-    removed = 0
-    try:
-        for p in folder.iterdir():
-            try:
-                if p.is_file() and not p.is_symlink() and p.stat().st_mtime < cutoff:
-                    p.unlink()
-                    removed += 1
-            except OSError:
-                continue
-    except OSError:
-        pass
-    return removed
-
-
-@router.post("/doc/upload")
-async def doc_upload(request: Request, name: str, keep: int = 0) -> dict:
-    from urllib.parse import unquote
-    clean = _safe_name(unquote(name))
-    ext = Path(clean).suffix.lower()
-    if ext not in _DOC_EXTS:
-        raise HTTPException(status_code=400, detail="That file type is not supported. PDF, Word (.docx), Excel (.xlsx), PowerPoint (.pptx), CSV and text files work.")
-    declared = request.headers.get("content-length")
-    if declared and declared.isdigit() and int(declared) > MAX_DOC_BYTES + 4096:
-        raise HTTPException(status_code=413, detail="That file is over 50 MB.")
-    folder = _doc_dirs()[1 if keep else 0]
-    folder.mkdir(parents=True, exist_ok=True)
-    stamp = time.strftime("%Y%m%d-%H%M%S")
-    target = folder / ("%s-%s-%s" % (stamp, os.urandom(3).hex(), clean))
-    size = 0
-    try:
-        with open(target, "wb") as fh:
-            async for chunk in request.stream():
-                size += len(chunk)
-                if size > MAX_DOC_BYTES:
-                    raise HTTPException(status_code=413, detail="That file is over 50 MB.")
-                fh.write(chunk)
-        if size == 0:
-            raise HTTPException(status_code=400, detail="That file is empty.")
-        try:
-            info = await asyncio.to_thread(_extract, target, ext)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from None
-        except HTTPException:
-            raise
-        except Exception:
-            raise HTTPException(status_code=400, detail="Could not read that file. It may be damaged.") from None
-        os.chmod(target, 0o640)
-    except BaseException:
-        with contextlib.suppress(OSError):
-            target.unlink()
-        raise
-    await asyncio.to_thread(_purge_old_uploads) if not keep else None
-    st = chat_model.selection(request.state.who["user"]) or await asyncio.to_thread(_engine_now)
-    return {
-        "name": clean, "path": str(target), "size": size, "kept": bool(keep),
-        "kind": info.get("kind"), "pages": info.get("pages"), "extra": info.get("extra"),
-        "preview": info.get("preview", ""), "scanned": bool(info.get("scanned")),
-        "cloud": st.get("engine") in ("cloud", "claude"),
-    }
-
-
-class DocMoveBody(BaseModel):
-    path: str = Field(min_length=5, max_length=400)
-    keep: bool
-
-
-@router.post("/doc/move")
-async def doc_move(body: DocMoveBody) -> dict:
-    """Switch an uploaded document between 'just for this chat' (auto-removed) and 'keep'. Only files this plugin stored."""
-    chat_dir, kept_dir = (d.resolve() for d in _doc_dirs())
-    try:
-        src = Path(body.path).resolve()
-    except (OSError, ValueError, RuntimeError):
-        raise HTTPException(status_code=404, detail="Not found.") from None
-    here, there = (chat_dir, kept_dir) if body.keep else (kept_dir, chat_dir)
-    if src.parent != here or not src.is_file() or src.is_symlink():
-        raise HTTPException(status_code=404, detail="Not found.")
-    there.mkdir(parents=True, exist_ok=True)
-    dest = there / src.name
-    if dest.exists():
-        raise HTTPException(status_code=409, detail="Already there.")
-    os.replace(src, dest)
-    return {"path": str(dest), "kept": body.keep}
 
 
 @router.get("/stream/{run_id}")
@@ -497,59 +383,6 @@ async def push_test() -> dict:
     return {"ok": res["sent"] > 0, **res}
 
 
-# --- approvals: what the agent proposes, and the owner's decision ---------------------
-#
-# The agent can only PROPOSE actions (see ops/atrium-actiond.py on the host). They wait there, together with the
-# credentials, until the owner approves in this app. The decision carries their dashboard session, which the host
-# service checks with the dashboard before it does anything.
-
-ACTIOND = os.environ.get("ACTION_GATE_URL") or "http://172.20.0.1:8765"
-_ACTION_ID_RE = re.compile(r"^[a-f0-9]{12}$")
-
-
-class DecideBody(BaseModel):
-    decision: Literal["approve", "deny"]
-
-
-def _actiond_sync(method: str, path: str, payload: Optional[dict] = None) -> tuple[int, dict]:
-    data = json.dumps(payload).encode("utf-8") if payload is not None else None
-    req = urllib.request.Request(ACTIOND + path, data=data, method=method, headers={"Content-Type": "application/json"})
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            return resp.status, json.loads(resp.read(500_000) or b"{}")
-    except urllib.error.HTTPError as exc:
-        try:
-            return exc.code, json.loads(exc.read(20_000) or b"{}")
-        except ValueError:
-            return exc.code, {}
-    except Exception:
-        raise HTTPException(status_code=502, detail="The approval service is not reachable.") from None
-
-
-@router.get("/actions")
-async def actions() -> dict:
-    code, data = await asyncio.to_thread(_actiond_sync, "GET", "/actions")
-    if code != 200:
-        raise HTTPException(status_code=502, detail="The approval service refused the request.")
-    return data
-
-
-@router.post("/actions/{action_id}/decide")
-async def decide_action(action_id: str, body: DecideBody, request: Request) -> dict:
-    if not _ACTION_ID_RE.fullmatch(action_id):
-        raise HTTPException(status_code=400, detail="Invalid action id.")
-    # replay the caller's own session credentials so the host service can confirm it really is a signed-in owner
-    auth = {k: v for k, v in request.headers.items() if k.lower() in ("cookie", "authorization") or "token" in k.lower() or "session" in k.lower()}
-    code, data = await asyncio.to_thread(_actiond_sync, "POST", "/decide", {"id": action_id, "decision": body.decision, "auth": auth})
-    if code == 401:
-        raise HTTPException(status_code=401, detail="You are not signed in. Sign in again and retry.")
-    if code in (404, 409):
-        raise HTTPException(status_code=code, detail=str(data.get("error") or "That request is no longer pending."))
-    if code != 200:
-        raise HTTPException(status_code=502, detail="The approval service refused the request.")
-    return data
-
-
 # --- the agent's name (read by every Atrium plugin and the host helpers) -----------------------------------------
 
 class AgentBody(BaseModel):
@@ -568,30 +401,6 @@ async def agent_set(body: AgentBody) -> dict:
         raise HTTPException(status_code=400, detail="Use letters, numbers, spaces, dots, apostrophes or hyphens (up to 40 characters).")
     save_agent_name(name)
     return {"name": name}
-
-
-@router.get("/actions/log")
-async def actions_log() -> dict:
-    """Mailbox tidying the agent did on her own (marked, flagged, moved), newest first, each with an Undo."""
-    code, data = await asyncio.to_thread(_actiond_sync, "GET", "/log")
-    if code != 200:
-        raise HTTPException(status_code=502, detail="The action service refused the request.")
-    return data
-
-
-@router.post("/actions/log/{entry_id}/undo")
-async def undo_action(entry_id: str, request: Request) -> dict:
-    if not _ACTION_ID_RE.fullmatch(entry_id):
-        raise HTTPException(status_code=400, detail="Invalid id.")
-    auth = {k: v for k, v in request.headers.items() if k.lower() in ("cookie", "authorization") or "token" in k.lower() or "session" in k.lower()}
-    code, data = await asyncio.to_thread(_actiond_sync, "POST", "/undo", {"id": entry_id, "auth": auth})
-    if code == 401:
-        raise HTTPException(status_code=401, detail="You are not signed in. Sign in again and retry.")
-    if code in (404, 409):
-        raise HTTPException(status_code=code, detail=str(data.get("error") or "That cannot be undone."))
-    if code != 200:
-        raise HTTPException(status_code=502, detail="The action service refused the request.")
-    return data
 
 
 # --- engine (read side): which model answers chats started here -------------------------------------------------
