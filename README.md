@@ -88,7 +88,7 @@ Early and used daily by its author, on one setup. Expect rough edges. Issues and
 ## About
 
 Atrium is **free, open-source software under the [MIT License](LICENSE)**. Use it, copy it, change it, share it and even sell it, for any
-purpose, with no fee. Copyright (c) 2026 Clutch Cassidy / RezWorks Studios.
+purpose, with no fee. Copyright (c) 2026 Joseph Price / RezWorks Studios.
 
 **No warranty, no liability.** Atrium is provided "as is", without warranty of any kind, and its author and contributors are not liable
 for any claim, damage or loss that comes from using it (the full wording is in [LICENSE](LICENSE)). It connects to an AI agent that can
