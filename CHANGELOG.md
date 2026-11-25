@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **A 30-second promo video** (`docs/promo/atrium-promo-30s.mp4`) linked from the README: real footage of the demo, a voice-over and music.
 ## 1.1.0 (2026-11-24)
 
 **Back to the MIT License.** Atrium is free, open-source software under the MIT License again (the same terms as 1.0.0), with the standard no-warranty, no-liability wording. 1.0.1 was published under AGPL-3.0; anyone who received that version may keep using it under AGPL, and everything from 1.1.0 on is MIT.

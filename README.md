@@ -10,6 +10,8 @@ no cloud account needed.
 
 ![Atrium home](docs/screenshots/home.png)
 
+**[Watch the 30-second tour](docs/promo/atrium-promo-30s.mp4)** (video, 5.6 MB).
+
 | Chat | Memory graph |
 | --- | --- |
 | ![Chat with tool activity](docs/screenshots/chat.png) | ![Notes as a graph](docs/screenshots/memory.png) |
