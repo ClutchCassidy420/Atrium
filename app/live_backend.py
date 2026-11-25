@@ -25,9 +25,10 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
+from voices import VOICE_IDS, voice_now
+
 router = APIRouter()
 
-VOICE_IDS = {"af_heart", "af_bella", "af_nicole", "af_sarah", "af_sky", "bf_emma", "bf_isabella"}
 MAX_TEXT = 1200
 MAX_AUDIO_BYTES = 8_000_000
 PROJECT_STATUS = {"active", "blocked", "waiting", "done", "idea"}
@@ -43,14 +44,7 @@ def _tts_base() -> str:
     return "%s://%s" % (u.scheme, u.netloc)
 
 
-def _voice_now() -> str:
-    try:
-        v = json.loads((_home() / "atrium" / "voice.json").read_text(encoding="utf-8")).get("voice")
-        if v in VOICE_IDS:
-            return v
-    except (OSError, ValueError, AttributeError):
-        pass
-    return "af_heart"
+_voice_now = voice_now
 
 
 def _voice_up() -> bool:
