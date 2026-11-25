@@ -1,9 +1,10 @@
 # Atrium: a front end for Hermes Agent
 
-[![tests](https://github.com/ClutchCassidy420/Atrium-Front-End-for-Hermes-Agent/actions/workflows/tests.yml/badge.svg)](https://github.com/ClutchCassidy420/Atrium-Front-End-for-Hermes-Agent/actions/workflows/tests.yml) [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![tests](https://github.com/ClutchCassidy420/Atrium-Front-End-for-Hermes-Agent/actions/workflows/tests.yml/badge.svg)](https://github.com/ClutchCassidy420/Atrium-Front-End-for-Hermes-Agent/actions/workflows/tests.yml) [![license: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 
 **A private, installable web app for your AI agent.** Chat, a mission-control home screen, scheduled jobs, a notes graph, a
-kanban board, approvals, phone notifications and a coding workspace, in one place, with real sign-in and per-person data.
+kanban board, approvals, phone notifications, a coding workspace, email, files, calendar and media, in one place, with real sign-in
+and per-person data.
 Built for [Hermes Agent](https://github.com/NousResearch/hermes-agent) and meant to run on your own hardware: no subscription,
 no cloud account needed.
 
@@ -33,8 +34,8 @@ python demo/run_demo.py
 Open <http://127.0.0.1:8770> and sign in as `demo` / `demo-demo-demo`. Everything the demo creates lives in `demo/.demo-data/`
 and is rebuilt on every start. Nothing real is read or sent anywhere.
 
-Pages that need extra services are not part of the demo: the Live agent (a 3D character file), the coding workspace (its sidecar)
-and the Room (a model key).
+Pages that need extra services are not part of the demo: the Live agent (a 3D character file), the coding workspace (its sidecar),
+the Room (a model key), Email, Files and Calendar (a mailbox and a Nextcloud), Media (a Jellyfin or Emby server) and REA (its sidecar).
 
 ## What is in it
 
@@ -44,6 +45,10 @@ and the Room (a model key).
 - **Memory**: the agent's notes (an Obsidian-style vault) as a graph, with search.
 - **Kanban**: a board for the agent's work and your ideas.
 - **Agentic coding**: projects, sessions, tool blocks, restore points, files, diffs, a terminal and a shared browser (needs the sidecar in `code-sidecar/`).
+- **Email, Files and Calendar** (optional): a mailbox over IMAP and SMTP (one for the install, or each person connects their own, up to five), with images blocked until you choose to show them; and Nextcloud files and calendar over WebDAV and CalDAV, with a reminder you can set on an event.
+- **Media** (optional): each person connects their own Jellyfin or Emby server and plays video and music in the page, with a continue-watching banner.
+- **REA workbench** (optional, owners only): upload a program or app and run read-only reverse-engineering analyses in a sealed container (needs `rea-sidecar/`).
+- **Chat extras**: emoji reactions from people and from the agent, and a UI kit (tables, dialogs, toasts) that new pages share.
 - **Live agent**: the agent on a 3D stage that speaks with lip-sync (bring your own character file).
 - **Settings, Persona, Avatar, Systems**, notifications, and an optional approval gate for actions you want to confirm.
 - **Server actions** (optional): install package updates, update Docker container groups (with a restore point, an automatic rollback if the new build is unhealthy, and a roll back button), reboot or shut down the machine from Settings, with confirmations and a cancel countdown, through a small helper that runs on the host (`host/`).
