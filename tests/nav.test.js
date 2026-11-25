@@ -160,7 +160,7 @@ const PAGES = [P("home", "Home", "", 0), P("chat", "Chat", "Agent", 10), P("memo
   await new Promise((r) => setTimeout(r, 50));
   assert(w.document.getElementById("vn-shell").classList.contains("vn-rail"), "a collapsed sidebar stays collapsed on the next page");
   w.close();
-  w = boot("https://app.test/", AP, ["Server"], { "vera.sidebar.rail": "true", "vera.sidebar.collapsed": "true" }, { shell: HEAD_SHELL });
+  w = boot("https://app.test/", AP, ["Server"], { "atrium.sidebar.rail": "true", "atrium.sidebar.collapsed": "true" }, { shell: HEAD_SHELL });
   await new Promise((r) => setTimeout(r, 50));
   assert(!w.document.getElementById("vn-shell").classList.contains("vn-rail"), "storage keys of one particular install are not part of the framework");
   w.close();
