@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 import extension_hooks
 from connections_backend import connection_router
+from guards import OWNERS_ONLY, role_guard
 from model_setup import model_setup_router
 
 OWNER_PLUGINS = ("memory", "workflows", "settings", "room", "skills")
@@ -90,15 +91,7 @@ def mount_owner_pages(app, cfg, hermes, current, same_origin) -> None:
     room_backend.SOUL_READER = mission_backend._soul_read      # the soul is read through the Hermes dashboard
     backends = {"memory": memory_backend, "workflows": workflows_backend, "settings": settings_backend, "room": room_backend, "skills": skills_backend}
 
-    async def guard(request: Request):
-        who = current(request)
-        if not who:
-            raise HTTPException(status_code=401, detail="Not signed in.")
-        if not cfg.allows(who["role"], "admin"):
-            raise HTTPException(status_code=403, detail="Only owners can use that.")
-        if request.method not in ("GET", "HEAD") and not same_origin(request):
-            raise HTTPException(status_code=403, detail="Bad origin.")
-        request.state.who = who
+    guard = role_guard(cfg, current, same_origin, "admin", denied=OWNERS_ONLY)
 
     for name in OWNER_PLUGINS:
         app.include_router(backends[name].router, prefix=prefix_for(name), dependencies=[Depends(guard)])

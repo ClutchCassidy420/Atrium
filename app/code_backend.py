@@ -27,6 +27,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSo
 from fastapi.responses import JSONResponse
 
 from agentkit import atomic_write_text
+from guards import OWNERS_ONLY, role_guard
 
 PREFIX = "/api/code"
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,59}$")
@@ -76,17 +77,11 @@ def mount_code(app, cfg, hermes, current, same_origin, owners) -> None:
     def save_store(d: dict) -> None:
         atomic_write_text(store_path, json.dumps(d, indent=1, sort_keys=True))
 
-    async def guard(request: Request):
-        who = current(request)
-        if not who:
-            raise HTTPException(status_code=401, detail="Not signed in.")
-        if not cfg.allows(who["role"], "admin"):
-            raise HTTPException(status_code=403, detail="Only owners can use that.")
-        if request.method not in ("GET", "HEAD") and not same_origin(request):
-            raise HTTPException(status_code=403, detail="Bad origin.")
+    def not_set_up(request: Request, who) -> None:
         if not configured and not request.url.path.endswith("/status"):
             raise HTTPException(status_code=503, detail="The coding workspace is not set up on this install.")
-        request.state.who = who
+
+    guard = role_guard(cfg, current, same_origin, "admin", denied=OWNERS_ONLY, after=not_set_up)
 
     async def upstream(method: str, path: str, params: dict | None = None, body=None, timeout: float = 60):
         try:
