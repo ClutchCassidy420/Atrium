@@ -163,3 +163,46 @@ def test_short_calls_share_one_client_per_loop_and_rebuild_when_settings_change(
     assert a is b and after is not a
     other_loop = asyncio.run(two())[0]
     assert other_loop is not a                      # a client is never carried onto another event loop
+
+
+# ---------------------------------------------------------------- the 15-minute reminder
+
+def _alarm_ics(extra_alarm: str = "") -> str:
+    return ("BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:u\r\nDTSTART:20261125T180000Z\r\nDTEND:20261125T190000Z\r\nSUMMARY:Haircut\r\nDESCRIPTION:Smart Style\r\n"
+            "BEGIN:VALARM\r\nACTION:DISPLAY\r\nDESCRIPTION:Haircut\r\nTRIGGER:-PT15M\r\nEND:VALARM\r\n" + extra_alarm + "END:VEVENT\r\nEND:VCALENDAR\r\n")
+
+
+def test_alarm_text_does_not_overwrite_the_event_and_sets_the_remind_flag():
+    ev = nc._parse_event(_alarm_ics())[0]
+    assert ev["description"] == "Smart Style" and ev["remind"] is True
+    assert nc._parse_event(ICS)[0]["remind"] is False
+
+
+def test_new_event_with_remind_carries_a_15_minute_display_alarm():
+    ev = nc.EventIn(title="Haircut", start="2026-11-25T18:00:00Z", end="2026-11-25T19:00:00Z", remind=True)
+    text = nc._wrap(["BEGIN:VEVENT", "UID:u"] + nc._event_lines(ev) + ["END:VEVENT"])
+    assert "BEGIN:VALARM\r\nACTION:DISPLAY\r\nDESCRIPTION:Haircut\r\nTRIGGER:-PT15M\r\nEND:VALARM" in text
+    assert nc._parse_event(text)[0]["remind"] is True
+    assert "VALARM" not in nc._wrap(nc._event_lines(ev.model_copy(update={"remind": False})))
+
+
+def _put_body(dav, ics, remind):
+    dav.server.script[("GET", "/work/u.ics")] = (200, {"etag": '"1"'}, ics.encode())
+    dav.server.script[("PUT", "/work/u.ics")] = (204, {}, b"")
+    body = {"title": "Haircut", "description": "Smart Style", "start": "2026-11-25T18:00:00Z", "end": "2026-11-25T19:00:00Z", "remind": remind}
+    assert dav.put("/api/nextcloud/events/work/u.ics", json=body, headers=H).status_code == 200
+    return [q for q in dav.server.seen if q.method == "PUT"][-1].content.decode()
+
+
+def test_unticking_remind_removes_only_the_15_minute_alarm(dav):
+    other = "BEGIN:VALARM\r\nACTION:DISPLAY\r\nDESCRIPTION:Leave now\r\nTRIGGER:-PT1H\r\nEND:VALARM\r\n"
+    sent = _put_body(dav, _alarm_ics(other), remind=False)
+    assert "-PT15M" not in sent and "TRIGGER:-PT1H" in sent and "DESCRIPTION:Leave now" in sent
+    assert nc._parse_event(sent)[0]["description"] == "Smart Style"
+
+
+def test_ticking_remind_on_an_edit_keeps_exactly_one_alarm_and_the_event_text(dav):
+    sent = _put_body(dav, _alarm_ics(), remind=True)
+    assert sent.count("TRIGGER:-PT15M") == 1
+    plain = _put_body(dav, ICS.replace("DTSTART;TZID=America/Chicago:20261125T090000", "DTSTART:20261125T180000Z"), remind=True)
+    assert plain.count("BEGIN:VALARM") >= 1 and "TRIGGER:-PT15M" in plain

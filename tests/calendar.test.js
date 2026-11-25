@@ -36,5 +36,27 @@ async function cal(fetchJSON) {
   [...w.document.querySelectorAll("button")].find(b => /Try again/.test(b.textContent)).click();
   await settle();
   assert.ok(w.document.querySelector(".cal-grid"));
+
+  // the event form has a "Remind me 15 minutes before" box: ticked from the event, saved in the request, hidden for all-day events
+  const now = new Date(), at = (h, m) => new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, m).toISOString();
+  const ev = { uid: "u", name: "u.ics", calendar: "a", title: "Haircut", start: at(13, 30), end: at(14, 0), all_day: false, writable: true, remind: false };
+  let sent = null;
+  w = await cal(async (url, opt) => {
+    if (opt && opt.method === "PUT") { sent = JSON.parse(opt.body); return { ok: true }; }
+    return url.includes("/status") ? { calendars: [{ id: "a", name: "Main", writable: true }] } : { events: [ev] };
+  });
+  await settle();
+  w.document.querySelector(".cal-chip").click();
+  await settle();
+  const box = [...w.document.querySelectorAll("label.cal-check")].find(l => /Remind me 15 minutes before/.test(l.textContent)).querySelector("input");
+  assert.equal(box.checked, false);
+  box.click(); await settle();
+  w.document.querySelector("form button[type=submit]").click();
+  await settle();
+  assert.equal(sent && sent.remind, true);
+  w.document.querySelector(".cal-chip").click(); await settle();
+  const allDay = [...w.document.querySelectorAll("label.cal-check")].find(l => /All day/.test(l.textContent)).querySelector("input");
+  allDay.click(); await settle();
+  assert.ok(![...w.document.querySelectorAll("label.cal-check")].some(l => /Remind me/.test(l.textContent)));
   console.log("calendar tests passed");
 })().catch(e => { console.error(e); process.exit(1); });
