@@ -32,8 +32,8 @@
     var ev = p.event, isNew = !ev.name;
     var a = useState(function () {
       var s = ev.s, e = ev.e;
-      if (ev.all_day) return { title: ev.title || "", allDay: true, sd: ymd(s), ed: ymd(addDays(e, -1)), st: "09:00", et: "10:00", loc: ev.location || "", desc: ev.description || "", cal: ev.calendar || "" };
-      return { title: ev.title || "", allDay: false, sd: ymd(s), ed: ymd(e), st: p2(s.getHours()) + ":" + p2(s.getMinutes()), et: p2(e.getHours()) + ":" + p2(e.getMinutes()), loc: ev.location || "", desc: ev.description || "", cal: ev.calendar || "" };
+      if (ev.all_day) return { title: ev.title || "", allDay: true, sd: ymd(s), ed: ymd(addDays(e, -1)), st: "09:00", et: "10:00", loc: ev.location || "", desc: ev.description || "", cal: ev.calendar || "", remind: !!ev.remind };
+      return { title: ev.title || "", allDay: false, sd: ymd(s), ed: ymd(e), st: p2(s.getHours()) + ":" + p2(s.getMinutes()), et: p2(e.getHours()) + ":" + p2(e.getMinutes()), loc: ev.location || "", desc: ev.description || "", cal: ev.calendar || "", remind: !!ev.remind };
     }), f = a[0], setF = a[1];
     var b = useState(""), msg = b[0], setMsg = b[1], c = useState(false), busy = c[0], setBusy = c[1];
     var writable = p.calendars.filter(function (x) { return x.writable; });
@@ -41,8 +41,8 @@
     function set(k, v) { var o = {}; o[k] = v; setF(Object.assign({}, f, o)); }
     function body() {
       var cal = f.cal || (writable[0] && writable[0].id) || "";
-      if (f.allDay) return { calendar: cal, title: f.title, all_day: true, start: f.sd, end: ymd(addDays(localDay(f.ed || f.sd), 1)), location: f.loc, description: f.desc };
-      return { calendar: cal, title: f.title, all_day: false, start: new Date(f.sd + "T" + f.st).toISOString(), end: new Date((f.ed || f.sd) + "T" + f.et).toISOString(), location: f.loc, description: f.desc };
+      if (f.allDay) return { calendar: cal, title: f.title, all_day: true, start: f.sd, end: ymd(addDays(localDay(f.ed || f.sd), 1)), location: f.loc, description: f.desc, remind: !f.allDay && !!f.remind };
+      return { calendar: cal, title: f.title, all_day: false, start: new Date(f.sd + "T" + f.st).toISOString(), end: new Date((f.ed || f.sd) + "T" + f.et).toISOString(), location: f.loc, description: f.desc, remind: !!f.remind };
     }
     function save(evn) {
       evn.preventDefault();
@@ -70,6 +70,7 @@
           h("label", null, "To", h("input", { type: "date", className: "hm-input", value: f.ed, min: f.sd, disabled: readonly, onChange: function (x) { set("ed", x.target.value); } })),
           f.allDay ? null : h("label", null, "Time", h("input", { type: "time", className: "hm-input", value: f.et, disabled: readonly, onChange: function (x) { set("et", x.target.value); } }))),
         isNew && writable.length > 1 ? h("label", null, "Calendar", h("select", { className: "hm-select cal-wide", value: f.cal || writable[0].id, onChange: function (x) { set("cal", x.target.value); } }, writable.map(function (cl) { return h("option", { key: cl.id, value: cl.id }, cl.name); }))) : null,
+        f.allDay ? null : h("label", { className: "cal-check" }, h("input", { type: "checkbox", checked: !!f.remind, disabled: readonly, onChange: function (x) { set("remind", x.target.checked); } }), "Remind me 15 minutes before"),
         h("input", { className: "hm-input", placeholder: "Location", value: f.loc, disabled: readonly, maxLength: 300, onChange: function (x) { set("loc", x.target.value); } }),
         h("textarea", { className: "hm-textarea", placeholder: "Notes", rows: 3, value: f.desc, disabled: readonly, maxLength: 8000, onChange: function (x) { set("desc", x.target.value); } }),
         msg ? h(UI.kit.Alert, { tone: "danger" }, msg) : null,

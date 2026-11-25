@@ -164,14 +164,22 @@ def _when(name: str, params: dict, value: str) -> tuple[str, bool]:
 
 def _parse_event(ics: str) -> list[dict]:
     """Every VEVENT in an iCalendar document, as plain dicts."""
-    events, cur = [], None
+    events, cur, in_alarm = [], None, False
     for line in _unfold(ics):
         if line == "BEGIN:VEVENT":
-            cur = {}
+            cur, in_alarm = {"_triggers": []}, False
         elif line == "END:VEVENT":
             if cur is not None:
                 events.append(cur)
             cur = None
+        elif cur is not None and line == "BEGIN:VALARM":
+            in_alarm = True
+        elif cur is not None and line == "END:VALARM":
+            in_alarm = False
+        elif cur is not None and in_alarm:
+            # An alarm has its own DESCRIPTION and TRIGGER; they must not overwrite the event's fields.
+            if line.upper().startswith("TRIGGER") and ":" in line:
+                cur["_triggers"].append(line.partition(":")[2].strip().upper())
         elif cur is not None and ":" in line:
             head, _, value = line.partition(":")
             bits = head.split(";")
@@ -191,7 +199,7 @@ def _parse_event(ics: str) -> list[dict]:
             end = start
         out.append({"uid": ev.get("UID", ("", {}))[0], "title": _unescape(ev.get("SUMMARY", ("", {}))[0]) or "(no title)", "start": start, "end": end, "all_day": all_day,
                     "location": _unescape(ev.get("LOCATION", ("", {}))[0]), "description": _unescape(ev.get("DESCRIPTION", ("", {}))[0]),
-                    "recurring": "RECURRENCE-ID" in ev or "RRULE" in ev, "status": ev.get("STATUS", ("", {}))[0]})
+                    "recurring": "RECURRENCE-ID" in ev or "RRULE" in ev, "status": ev.get("STATUS", ("", {}))[0], "remind": REMINDER_TRIGGER in ev["_triggers"]})
     return out
 
 
@@ -205,12 +213,21 @@ def _ical_time(prop: str, value: str, all_day: bool) -> str:
     return "%s:%s" % (prop, dt.strftime("%Y%m%dT%H%M%S"))
 
 
+REMINDER_TRIGGER = "-PT15M"  # the "remind me" box: a display alarm 15 minutes before the start
+
+
+def _reminder_lines(title: str) -> list[str]:
+    return ["BEGIN:VALARM", "ACTION:DISPLAY", "DESCRIPTION:" + _escape(title.strip() or "Event"), "TRIGGER:" + REMINDER_TRIGGER, "END:VALARM"]
+
+
 def _event_lines(ev: "EventIn") -> list[str]:
     lines = [_ical_time("DTSTART", ev.start, ev.all_day), _ical_time("DTEND", ev.end, ev.all_day), "SUMMARY:" + _escape(ev.title.strip() or "(no title)")]
     if ev.location.strip():
         lines.append("LOCATION:" + _escape(ev.location.strip()))
     if ev.description.strip():
         lines.append("DESCRIPTION:" + _escape(ev.description.strip()))
+    if ev.remind:
+        lines.extend(_reminder_lines(ev.title))
     return lines
 
 
@@ -226,6 +243,7 @@ class EventIn(BaseModel):
     all_day: bool = False
     location: str = Field("", max_length=300)
     description: str = Field("", max_length=8000)
+    remind: bool = False  # add (or keep) a reminder 15 minutes before it starts
 
 
 def _valid_times(ev: EventIn) -> None:
@@ -342,7 +360,18 @@ async def change_event(calendar: str, name: str, ev: EventIn):
         raise HTTPException(status_code=400, detail="This event repeats. Change it in Nextcloud so the whole series stays right.")
     keep, inside, done = [], False, False
     drop = ("DTSTART", "DTEND", "DURATION", "SUMMARY", "LOCATION", "DESCRIPTION")
+    alarm = None  # lines of the VALARM being read; other alarms are kept as they were, the 15-minute one follows the box
     for line in _unfold(text):
+        if inside and line == "BEGIN:VALARM":
+            alarm = [line]
+            continue
+        if alarm is not None:
+            alarm.append(line)
+            if line == "END:VALARM":
+                if not any(l.upper().startswith("TRIGGER") and l.partition(":")[2].strip().upper() == REMINDER_TRIGGER for l in alarm):
+                    keep.extend(alarm)
+                alarm = None
+            continue
         if line == "BEGIN:VEVENT":
             inside = True
         if inside and line.split(":")[0].split(";")[0].upper() in drop:
