@@ -34,6 +34,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 import kanban_backend as kb
+from httpkit import shared
 
 NOTES_PROJECT = "idea-pipeline"
 WORKSPACE_ROOT = "/workspace"                      # where the agent sees the coding projects
@@ -81,8 +82,7 @@ async def _code(method: str, path: str, params=None, body=None):
     if not (CFG and CFG.code_url and CFG.code_token):
         raise HTTPException(status_code=503, detail="The coding workspace is not set up on this install.")
     try:
-        async with httpx.AsyncClient(timeout=60) as c:
-            r = await c.request(method, CFG.code_url.rstrip("/") + path, params=params, json=body, headers={"X-Code-Token": CFG.code_token})
+        r = await shared().request(method, CFG.code_url.rstrip("/") + path, params=params, json=body, headers={"X-Code-Token": CFG.code_token}, timeout=60)
     except httpx.HTTPError:
         raise HTTPException(status_code=502, detail="The coding workspace is not reachable.") from None
     try:

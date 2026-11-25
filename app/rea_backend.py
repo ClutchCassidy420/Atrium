@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from guards import OWNERS_ONLY, role_guard
+from httpkit import shared
 
 MAX_UPLOAD = 1024 ** 3
 ID = re.compile(r"^[0-9a-f]{12}$")
@@ -28,8 +29,7 @@ def rea_router(cfg, current, same_origin) -> APIRouter:
 
     async def upstream(method: str, path: str, params=None, body=None, timeout: float = 30):
         try:
-            async with httpx.AsyncClient(timeout=timeout) as c:
-                r = await c.request(method, base + path, params=params, json=body, headers=headers)
+            r = await shared().request(method, base + path, params=params, json=body, headers=headers, timeout=timeout)
         except httpx.HTTPError:
             raise HTTPException(status_code=502, detail="The REA workbench is not reachable.") from None
         try:
@@ -48,8 +48,7 @@ def rea_router(cfg, current, same_origin) -> APIRouter:
     @router.get("/status")
     async def status():
         try:
-            async with httpx.AsyncClient(timeout=4) as c:
-                r = await c.get(base + "/healthz")
+            r = await shared().get(base + "/healthz", timeout=4)
             return {"configured": True, "up": r.status_code == 200}
         except httpx.HTTPError:
             return {"configured": True, "up": False}
