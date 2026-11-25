@@ -283,3 +283,13 @@ def test_one_message_holds_a_limited_number_of_kinds_and_reactions_go_with_the_c
     assert chat.post(R + sid, json={"index": 0, "emoji": "\U0001F608"}, headers=H).status_code == 400
     assert chat.delete("/api/sessions/" + sid, headers=H).status_code == 200
     assert chat.app.state.chat_reactions.get(sid, "bob") == {}
+
+
+def test_voice_choice_is_listed_saved_and_checked(chat):
+    chat.as_("alice", PW, "10.5.0.16")
+    got = chat.get(P + "/voice").json()
+    assert got["voice"] == "af_heart" and {"id": "af_bella", "label": "Bella"} in got["choices"]
+    assert chat.post(P + "/voice", json={"voice": "nope"}, headers=H).status_code == 400
+    assert chat.post(P + "/voice", json={"voice": "af_bella"}, headers=H).json() == {"voice": "af_bella"}
+    assert chat.get(P + "/voice").json()["voice"] == "af_bella"
+    assert chat.post(P + "/speak", json={"text": "   "}, headers=H).status_code in (400, 422)

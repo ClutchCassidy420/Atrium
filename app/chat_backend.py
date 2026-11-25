@@ -15,7 +15,7 @@ Routes (mounted by the Hermes dashboard under /api/plugins/atrium-chat):
   GET  /status                     is the agent API reachable
   POST /send                       start one run inside a chat session (conversation memory comes from the session id)
   POST /doc/upload?name=&keep=     receive a document (PDF, Word, Excel, PowerPoint, big text/CSV, up to 50 MB) and return a preview
-  POST /speak {text, voice?}       read a short piece of text aloud (audio/mpeg from the local Kokoro voice); GET/POST /voice picks the voice
+  (voice: GET/POST /voice and POST /speak now live in chat_voice.py)
   GET  /stream/{run_id}            server-sent events for that run (words as they are written, tool activity, the end)
   GET  /runs/{run_id}              run state (used to find approval requests)
   POST /runs/{run_id}/stop         stop a run
@@ -568,81 +568,6 @@ async def agent_set(body: AgentBody) -> dict:
         raise HTTPException(status_code=400, detail="Use letters, numbers, spaces, dots, apostrophes or hyphens (up to 40 characters).")
     save_agent_name(name)
     return {"name": name}
-
-
-# --- voice: The agent reads replies aloud --------------------------------------------------------------------------------
-# The words go to Kokoro (the text-to-speech server on this host, internal network only) and the audio comes straight
-# back; nothing leaves the server, whichever engine wrote the reply. The page cuts a reply into short pieces so playback
-# starts after the first sentence.
-
-KOKORO_URL = os.environ.get("TTS_URL") or "http://atrium-kokoro:8880/v1/audio/speech"
-VOICE_CHOICES = [
-    ("af_heart", "Heart (warm, the default)"), ("af_bella", "Bella"), ("af_nicole", "Nicole (soft)"), ("af_sarah", "Sarah"),
-    ("af_sky", "Sky"), ("bf_emma", "Emma (British)"), ("bf_isabella", "Isabella (British)"),
-]
-_VOICE_IDS = {v for v, _ in VOICE_CHOICES}
-_speak_gate = asyncio.Semaphore(1)                  # one voice request at a time: the graphics card is shared
-
-
-class SpeakBody(BaseModel):
-    text: str = Field(min_length=1, max_length=700)
-    voice: Optional[str] = Field(default=None, max_length=40)
-
-
-class VoiceBody(BaseModel):
-    voice: str = Field(max_length=40)
-
-
-def _voice_file() -> Path:
-    return _hermes_home() / "atrium" / "voice.json"
-
-
-def _voice_now() -> str:
-    try:
-        v = json.loads(_voice_file().read_text(encoding="utf-8")).get("voice")
-        if v in _VOICE_IDS:
-            return v
-    except (OSError, ValueError, AttributeError):
-        pass
-    return "af_heart"
-
-
-@router.get("/voice")
-async def voice_info() -> dict:
-    return {"voice": _voice_now(), "choices": [{"id": v, "label": n} for v, n in VOICE_CHOICES]}
-
-
-@router.post("/voice")
-async def voice_set(body: VoiceBody) -> dict:
-    if body.voice not in _VOICE_IDS:
-        raise HTTPException(status_code=400, detail="That voice is not available.")
-    f = _voice_file()
-    f.parent.mkdir(parents=True, exist_ok=True)
-    atomic_write_text(f, json.dumps({"voice": body.voice}))
-    return {"voice": body.voice}
-
-
-def _synth_sync(text: str, voice: str) -> bytes:
-    payload = json.dumps({"model": "kokoro", "input": text, "voice": voice, "response_format": "mp3", "speed": 1.0}).encode("utf-8")
-    req = urllib.request.Request(KOKORO_URL, data=payload, method="POST", headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=60) as resp:
-        return resp.read(8_000_000)
-
-
-@router.post("/speak")
-async def speak(body: SpeakBody) -> Response:
-    voice = body.voice if body.voice in _VOICE_IDS else _voice_now()
-    text = re.sub(r"\s+", " ", body.text).strip()
-    if not text:
-        raise HTTPException(status_code=400, detail="Nothing to read.")
-    async with _speak_gate:
-        try:
-            audio = await asyncio.to_thread(_synth_sync, text, voice)
-        except Exception:
-            raise HTTPException(status_code=502, detail="The voice is not available right now.") from None
-    if not audio:
-        raise HTTPException(status_code=502, detail="The voice returned nothing.")
-    return Response(content=audio, media_type="audio/mpeg", headers={"Cache-Control": "no-store"})
 
 
 @router.get("/actions/log")

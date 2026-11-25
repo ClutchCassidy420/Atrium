@@ -94,8 +94,9 @@ def mount_chat(app, cfg, hermes, current, same_origin) -> ChatOwners:
     import chat_push
     chat_push.PUSH_ENABLED = cfg.push_enabled
     chat_push.PUSH_PROXY = cfg.push_proxy or None
+    import chat_voice
     if cfg.tts_url:
-        backend.KOKORO_URL = cfg.tts_url
+        chat_voice.KOKORO_URL = cfg.tts_url
     if cfg.action_gate_url:
         backend.ACTIOND = cfg.action_gate_url
 
@@ -152,7 +153,7 @@ def mount_chat(app, cfg, hermes, current, same_origin) -> ChatOwners:
     router = APIRouter()
     # without an approval service the page's pending-actions checks would fail every few seconds, so they answer "none"
     off = (() if cfg.push_enabled else PUSH_ROUTES) + (() if cfg.action_gate_url else ("/actions",))
-    for route in backend.router.routes:
+    for route in list(backend.router.routes) + list(chat_voice.router.routes):
         path = getattr(route, "path", "")
         if any(path == p or path.startswith(p) for p in off):
             continue
