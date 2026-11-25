@@ -210,7 +210,9 @@ class Throttle:
                 return int(rec[1] - time.time()) + 1
             return 0
 
-    def failed(self, who: str) -> None:
+    def failed(self, who: str, max_fails: int | None = None, lock_s: int | None = None) -> None:
+        """Count a wrong password. ``max_fails`` and ``lock_s`` override this throttle's defaults for this one key."""
+        limit, lock_for = max_fails or self.max_fails, lock_s or self.lock_s
         with self.lock:
             now = time.time()
             if who not in self.fails and len(self.fails) >= self.MAX_TRACKED:
@@ -220,8 +222,8 @@ class Throttle:
                 rec[0], rec[1] = 0, 0.0
             rec[2] = now
             rec[0] += 1
-            if rec[0] >= self.max_fails:
-                rec[1] = time.time() + self.lock_s
+            if rec[0] >= limit:
+                rec[1] = time.time() + lock_for
                 rec[0] = 0
 
     def ok(self, who: str) -> None:

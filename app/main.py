@@ -236,8 +236,9 @@ def make_app(cfg: configmod.Config | None = None, hermes: Hermes | None = None, 
         # the slow password check runs in a worker thread so one login never freezes every other request
         good = bool(password) and await asyncio.to_thread(verify_password, password, stored)
         if not (good and user and cfg.valid_role(user["role"])):
-            for k in keys:
-                throttle.failed(k)
+            throttle.failed(keys[0])                           # one address: locked after a few wrong passwords
+            if user:                                           # one name: only a flood from many addresses locks it, and briefly, so a stranger cannot keep the real person out
+                throttle.failed(keys[1], max_fails=cfg.max_fails * 6, lock_s=min(cfg.lock_minutes * 60, 300))
             await asyncio.sleep(0.4)
             return login_page("Wrong username or password.", 401)
         for k in keys:

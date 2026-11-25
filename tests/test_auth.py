@@ -48,13 +48,21 @@ def test_logout_ends_the_session(make):
     assert c.get("/").status_code == 303
 
 
-def test_lockout_by_address_and_by_username(make):
+def test_one_address_is_locked_out_but_the_account_stays_usable(make):
     c = make(users=(("alice", "owner", PW), ("bob", "user", PW2)))
     for _ in range(auth.MAX_FAILS):
         assert login(c, "alice", "wrong wrong wrong", ip="10.0.0.1").status_code == 401
-    assert login(c, "alice", PW, ip="10.0.0.1").status_code == 429       # right password, still locked
-    assert login(c, "alice", PW, ip="10.0.0.2").status_code == 429       # that account is locked from any address
-    assert login(c, "bob", PW2, ip="10.0.0.2").status_code == 303        # others are not affected
+    assert login(c, "alice", PW, ip="10.0.0.1").status_code == 429       # right password, but that address is locked
+    assert login(c, "bob", PW2, ip="10.0.0.1").status_code == 429        # and so is everything else it tries
+    assert login(c, "alice", PW, ip="10.0.0.2").status_code == 303       # the real person, from elsewhere, still gets in
+
+
+def test_a_flood_from_many_addresses_locks_the_account_briefly(make):
+    c = make(users=(("alice", "owner", PW), ("bob", "user", PW2)))
+    for n in range(auth.MAX_FAILS * 6):
+        assert login(c, "alice", "wrong wrong wrong", ip="10.1.0.%d" % (n + 1)).status_code == 401
+    assert login(c, "alice", PW, ip="10.2.0.1").status_code == 429
+    assert login(c, "bob", PW2, ip="10.2.0.1").status_code == 303        # others are not affected
 
 
 def test_cross_site_and_null_origin_are_refused(make):
