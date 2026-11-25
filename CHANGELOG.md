@@ -4,10 +4,12 @@
 
 ## 1.1.0 (2026-11-24)
 
+**Back to the MIT License.** Atrium is free, open-source software under the MIT License again (the same terms as 1.0.0), with the standard no-warranty, no-liability wording. 1.0.1 was published under AGPL-3.0; anyone who received that version may keep using it under AGPL, and everything from 1.1.0 on is MIT.
+
 The biggest changes: a five-minute install (`docker compose up -d --build`, first owner made in the browser), Email, Files, Calendar, Media and REA pages, personal mailboxes, chat reactions, a shared UI kit, faster mail and service calls, and a refreshed README and screenshots.
 
 - **A five-minute install.** `docker compose up -d --build` now works with no editing: a ready `compose.yaml` (no external networks, this computer only by default, hardened like the production example), safe defaults in the image, and the first owner is made in the browser on a `/setup` page guarded by a one-time setup code printed in the log. No more copying folders or running `manage_users.py` to start. New `docs/INSTALL.md`, `.env.example`, and `ALLOW_PLAIN_HTTP=1` for sign-in over http on localhost. Production setups keep using `deploy/compose.example.yaml`.
-- **README, screenshots and social preview refreshed.** The screenshots now show the current app (Media in the sidebar, the new Home tiles, container update with Roll back), and the social preview and the license badge say AGPL-3.0 instead of MIT. The README lists Email, Files, Calendar, Media and REA.
+- **README, screenshots and social preview refreshed.** The screenshots now show the current app (Media in the sidebar, the new Home tiles, container update with Roll back), and the social preview and the license badge now state the license correctly. The README lists Email, Files, Calendar, Media and REA.
 - **Media page redesign.** A "continue watching" banner with a Resume button, libraries as chips, sideways-scrolling rows with the right picture shape (posters, wide episode pictures, square album art), video and music kept apart ("Recently added" and "New music"), albums as a track list, and a music bar that stays at the bottom while you browse and moves on to the next track. Page code only; no server changes. Tests in `tests/media.test.js`.
 - **Emoji reactions in chat.** Each message gets a **☺+** picker; people react and un-react, and see counted chips (stored per chat, private to who may open it). The agent can react by writing `[[react: 👍]]` in a reply: the page hides the marker and shows it on the message before. New `app/chat_reactions.py`, routes under `/api/plugins/atrium-chat/reactions/`. Tests in `tests/test_chat.py` and `tests/chat-reactions.test.js`.
 - **REA workbench (optional, owners only).** New **REA** page: upload a program or app and run read-only reverse-engineering analyses (JavaScript/Electron, .NET, Windows imports and signatures, Go/Rust/Python/NuGet, firmware and packed files, Ghidra search/function/decompile/cross-references) with an outline, raw view and download of the result. Runs in a new sealed `rea-sidecar/` container (internal network only, read-only system, limits, uploads never run, results deleted after a day) with REA and Ghidra pinned in its image. Off unless `REA_URL` and `REA_TOKEN` are set. New `rea-sidecar/`, `app/rea_backend.py`, `app/static/pages/rea/`; routes under `/api/rea`; page `requires` may now be `"rea"`. Tests: `tests/test_rea.py`, `tests/rea.test.js`.
@@ -55,9 +57,9 @@ The biggest changes: a five-minute install (`docker compose up -d --build`, firs
   keeps restore points until the previous version is verified, and can roll back a group that is down. Tests: `tests/test_audit_fixes.py` plus new cases in
   `tests/test_auth.py` and `tests/test_hostctl_daemon.py`.
 
-## 1.0.1 (license change)
+## 1.0.1 (license change, later reversed in 1.1.0)
 
-Atrium is now licensed under the **GNU Affero General Public License v3.0** (AGPL-3.0) instead of the MIT License.
+Atrium was licensed under the **GNU Affero General Public License v3.0** (AGPL-3.0) instead of the MIT License.
 
 - Version 1.0.0 and every commit up to `b5e180c` were published under the MIT License. Anyone who received those versions may keep using
   them under MIT. Everything after that commit is AGPL-3.0.

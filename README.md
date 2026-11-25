@@ -1,6 +1,6 @@
 # Atrium: a front end for Hermes Agent
 
-[![tests](https://github.com/ClutchCassidy420/Atrium/actions/workflows/tests.yml/badge.svg)](https://github.com/ClutchCassidy420/Atrium/actions/workflows/tests.yml) [![license: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
+[![tests](https://github.com/ClutchCassidy420/Atrium/actions/workflows/tests.yml/badge.svg)](https://github.com/ClutchCassidy420/Atrium/actions/workflows/tests.yml) [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 **A private, installable web app for your AI agent.** Chat, a mission-control home screen, scheduled jobs, a notes graph, a
 kanban board, approvals, phone notifications, a coding workspace, email, files, calendar and media, in one place, with real sign-in
@@ -87,8 +87,13 @@ Early and used daily by its author, on one setup. Expect rough edges. Issues and
 
 ## About
 
-Atrium was created by Clutch Cassidy / RezWorks Studios and is released under the [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0).
-In plain words: use it, change it and share it; if you run a modified version as a service for other people, you must share your changes under
-the same license. Releases up to and including 1.0.0 were published under the MIT License and stay available under it; see the
-[changelog](CHANGELOG.md). Copyright (C) 2026 Clutch Cassidy / RezWorks Studios. Atrium is independent of, and not
-affiliated with or endorsed by, Nous Research. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for what it is built with.
+Atrium is **free, open-source software under the [MIT License](LICENSE)**. Use it, copy it, change it, share it and even sell it, for any
+purpose, with no fee. Copyright (c) 2026 Clutch Cassidy / RezWorks Studios.
+
+**No warranty, no liability.** Atrium is provided "as is", without warranty of any kind, and its author and contributors are not liable
+for any claim, damage or loss that comes from using it (the full wording is in [LICENSE](LICENSE)). It connects to an AI agent that can
+read files and take actions, so you run it, and decide what it may do, at your own risk.
+
+Version 1.0.1 was briefly released under the AGPL-3.0; everything from 1.1.0 on is MIT again (see the [changelog](CHANGELOG.md)).
+Atrium is independent of, and not affiliated with or endorsed by, Nous Research. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for
+what it is built with.

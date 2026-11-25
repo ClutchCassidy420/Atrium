@@ -1,6 +1,6 @@
 # Third-party notices
 
-Atrium is licensed under the [GNU Affero General Public License v3.0](LICENSE). The libraries below keep their own (permissive) licences, which
+Atrium is licensed under the [MIT License](LICENSE). The libraries below keep their own (permissive) licences, which
 are compatible with it. This page lists the code it bundles and the software it works with, so you
 can see what you rely on and under which licences.
 
