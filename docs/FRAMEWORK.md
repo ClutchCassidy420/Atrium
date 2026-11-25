@@ -29,6 +29,7 @@ Copy `instance.example/` to start a new install. Secrets go in `config.private.e
 ## Users and roles
 
 - People are in `DATA_DIR/users.json` (username, role, password hash; mode 600). Passwords are stored only as scrypt hashes.
+- The first owner is made in the browser: on a new install `/login` sends you to `/setup`, where the one-time setup code from the container log lets you choose a username and password (see [INSTALL.md](INSTALL.md)).
 - Manage them inside the app container so the files keep the right owner:
   `docker exec -it <container> python /srv/scripts/manage_users.py /data list | add | passwd | role | remove`.
 - A role is a list of permissions (`"*"` means all). Defaults: `owner = ["*"]`, `user = ["use"]`. Add roles in `[roles]`.

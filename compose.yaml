@@ -1,0 +1,33 @@
+# The quick start: `docker compose up -d --build`, then open http://localhost:8000 (see docs/INSTALL.md).
+# It works with no edits. Settings you may want go in a file called .env next to this one (copy .env.example).
+# For a real server (reverse proxy, private networks, the agent's folders) start from deploy/compose.example.yaml instead.
+services:
+  atrium:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile
+    image: atrium:latest
+    container_name: atrium
+    restart: unless-stopped
+    ports:
+      - "${ATRIUM_BIND:-127.0.0.1}:${ATRIUM_PORT:-8000}:8000"     # only this computer by default; see docs/INSTALL.md before opening it up
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      ALLOW_PLAIN_HTTP: "1"             # sign in over http://localhost; put HTTPS in front before anyone else can reach it
+    extra_hosts:
+      - "host.docker.internal:host-gateway"     # lets the app reach an agent running on this same computer
+    volumes:
+      - atrium-data:/data               # people, sessions, settings (kept when the container is rebuilt)
+      - atrium-agent:/opt/data          # the agent's shared folder: notes, uploads (replace with a real folder if Hermes runs here)
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,nosuid
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 100
+    mem_limit: 256m
+volumes:
+  atrium-data:
+  atrium-agent:
