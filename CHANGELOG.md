@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 1.1.0 (2026-11-24)
+
+The biggest changes: a five-minute install (`docker compose up -d --build`, first owner made in the browser), Email, Files, Calendar, Media and REA pages, personal mailboxes, chat reactions, a shared UI kit, faster mail and service calls, and a refreshed README and screenshots.
+
 - **A five-minute install.** `docker compose up -d --build` now works with no editing: a ready `compose.yaml` (no external networks, this computer only by default, hardened like the production example), safe defaults in the image, and the first owner is made in the browser on a `/setup` page guarded by a one-time setup code printed in the log. No more copying folders or running `manage_users.py` to start. New `docs/INSTALL.md`, `.env.example`, and `ALLOW_PLAIN_HTTP=1` for sign-in over http on localhost. Production setups keep using `deploy/compose.example.yaml`.
 - **README, screenshots and social preview refreshed.** The screenshots now show the current app (Media in the sidebar, the new Home tiles, container update with Roll back), and the social preview and the license badge say AGPL-3.0 instead of MIT. The README lists Email, Files, Calendar, Media and REA.
 - **Media page redesign.** A "continue watching" banner with a Resume button, libraries as chips, sideways-scrolling rows with the right picture shape (posters, wide episode pictures, square album art), video and music kept apart ("Recently added" and "New music"), albums as a track list, and a music bar that stays at the bottom while you browse and moves on to the next track. Page code only; no server changes. Tests in `tests/media.test.js`.
