@@ -10,7 +10,9 @@ no cloud account needed.
 
 ![Atrium home](docs/screenshots/home.png)
 
-**[Watch the 30-second tour](docs/promo/atrium-promo-30s.mp4)** (video, 5.6 MB).
+[![Atrium in 30 seconds](docs/promo/atrium-promo.gif)](https://github.com/ClutchCassidy420/Atrium/releases/tag/v1.1.0)
+
+*Click the picture for the full video with sound (attached to the 1.1.0 release).*
 
 | Chat | Memory graph |
 | --- | --- |
