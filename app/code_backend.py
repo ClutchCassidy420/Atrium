@@ -28,6 +28,7 @@ from fastapi.responses import JSONResponse
 
 from agentkit import atomic_write_text
 from guards import OWNERS_ONLY, role_guard
+from httpkit import shared
 
 PREFIX = "/api/code"
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,59}$")
@@ -85,8 +86,7 @@ def mount_code(app, cfg, hermes, current, same_origin, owners) -> None:
 
     async def upstream(method: str, path: str, params: dict | None = None, body=None, timeout: float = 60):
         try:
-            async with httpx.AsyncClient(timeout=timeout) as c:
-                r = await c.request(method, base + path, params=params, json=body, headers=headers)
+            r = await shared().request(method, base + path, params=params, json=body, headers=headers, timeout=timeout)
         except httpx.HTTPError:
             raise HTTPException(status_code=502, detail="The coding workspace is not reachable.") from None
         try:
@@ -105,8 +105,7 @@ def mount_code(app, cfg, hermes, current, same_origin, owners) -> None:
         if not configured:
             return {"configured": False, "up": False}
         try:
-            async with httpx.AsyncClient(timeout=4) as c:
-                r = await c.get(base + "/healthz")
+            r = await shared().get(base + "/healthz", timeout=4)
             return {"configured": True, "up": r.status_code == 200}
         except httpx.HTTPError:
             return {"configured": True, "up": False}
