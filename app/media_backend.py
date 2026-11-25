@@ -19,6 +19,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
 
+from guards import role_guard
 import media_servers as ms
 from media_servers import MediaError
 
@@ -120,16 +121,10 @@ def media_router(cfg, current, same_origin, store: "ms.Servers") -> APIRouter:
     router = APIRouter()
     private_allowed = bool(getattr(cfg, "media_allow_private", False))
 
-    async def guard(request: Request):
-        who = current(request)
-        if not who:
-            raise HTTPException(status_code=401, detail="Not signed in.")
-        if not cfg.allows(who["role"], "use"):
-            raise HTTPException(status_code=403, detail="Not allowed.")
-        if request.method not in ("GET", "HEAD") and not same_origin(request):
-            raise HTTPException(status_code=403, detail="Bad origin.")
-        request.state.who = who
+    def private_ok(request: Request, who) -> None:
         request.state.private_ok = private_allowed and cfg.allows(who["role"], "admin")
+
+    guard = role_guard(cfg, current, same_origin, "use", after=private_ok)
 
     api = APIRouter(dependencies=[Depends(guard)])
 

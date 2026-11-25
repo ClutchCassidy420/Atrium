@@ -11,6 +11,8 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
+from guards import OWNERS_ONLY, role_guard
+
 MAX_UPLOAD = 1024 ** 3
 ID = re.compile(r"^[0-9a-f]{12}$")
 NAME = re.compile(r"^[^\x00-\x1f/\\]{1,150}$")
@@ -20,15 +22,7 @@ def rea_router(cfg, current, same_origin) -> APIRouter:
     base = cfg.rea_url.rstrip("/")
     headers = {"X-Rea-Token": cfg.rea_token}
 
-    async def guard(request: Request):
-        who = current(request)
-        if not who:
-            raise HTTPException(status_code=401, detail="Not signed in.")
-        if not cfg.allows(who["role"], "admin"):
-            raise HTTPException(status_code=403, detail="Only owners can use that.")
-        if request.method not in ("GET", "HEAD") and not same_origin(request):
-            raise HTTPException(status_code=403, detail="Bad origin.")
-        request.state.who = who
+    guard = role_guard(cfg, current, same_origin, "admin", denied=OWNERS_ONLY)
 
     router = APIRouter(dependencies=[Depends(guard)])
 
