@@ -9,5 +9,5 @@ Thanks for looking. Atrium is a small project, so a few simple rules keep it eas
 - **One design.** Colors, radius and fonts are CSS variables in `app/static/tokens.css`; pages use those and nothing else.
 - **No secrets, no real data** in issues, screenshots or pull requests.
 - Open an issue before a big change, so we can agree on the shape of it.
-- **License:** Atrium is AGPL-3.0, and contributions are accepted under that license. The maintainer also owns the project and may offer it under
-  other terms, so larger contributions may need a short contributor agreement first; open an issue to talk it through.
+- **License:** Atrium is MIT licensed. By sending a contribution you agree it is released under the same MIT License, and that you have the
+  right to share it.
