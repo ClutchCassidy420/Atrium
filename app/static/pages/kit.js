@@ -1,8 +1,9 @@
 /* Atrium UI kit: reusable, accessible components for framework and instance pages. Plain script, no build step, like
    common.js. Load it after common.js and kit.css; everything lives on window.__APP_UI__.kit (alias UI.kit).
 
-   Components:  Button, Spinner, Loading, EditorDialog, Skeleton, Alert, EmptyState, AsyncView, Field, Tabs, Dialog
-   Hooks:       useAsync(fn, deps), useId(prefix), useDisclosure(initial)
+   Components:  Button, Spinner, Loading, EditorDialog, Skeleton, Alert, EmptyState, AsyncView, Field, Tabs, Dialog,
+                Badge, Switch, SearchInput, ConfirmDialog, ToastProvider, DataTable, Pagination
+   Hooks:       useAsync(fn, deps), useId(prefix), useDisclosure(initial), useDebounce(value, ms), useToast()
    Conventions: every component takes `className` (appended) and passes through unknown DOM props via `...rest`-style
                 `attrs`; state is expressed as props (`loading`, `disabled`, `invalid`), never by swapping components;
                 colors and radii come from tokens.css only. See docs/UI-KIT.md for the full API. */
@@ -250,6 +251,166 @@
       h("label", { className: "kit-label kit-sr", htmlFor: id }, p.title),
       h("textarea", { id: id, className: "kit-input kit-textarea", value: text, readOnly: ro, spellCheck: false, placeholder: p.placeholder || "",
         "data-autofocus": p.fields ? undefined : "true", onChange: function (x) { setText(x.target.value); } }));
+  };
+
+  /* ---- useDebounce -------------------------------------------------------------------------------------------- */
+  /* const q = useDebounce(text, 300): the value after it has stopped changing for `ms`. Timer is cleared on change/unmount. */
+  kit.useDebounce = function (value, ms) {
+    var s = useState(value), v = s[0], set = s[1];
+    useEffect(function () { var t = setTimeout(function () { set(value); }, ms == null ? 300 : ms); return function () { clearTimeout(t); }; }, [value, ms]);
+    return v;
+  };
+
+  /* ---- Badge / Switch ------------------------------------------------------------------------------------------ */
+  /* <Badge tone="neutral|info|success|warning|danger">Live</Badge>. Meaning is in the text; color is only reinforcement. */
+  kit.Badge = function (p) {
+    return h("span", merge({ className: cx("kit-badge", "kit-badge-" + (p.tone || "neutral"), p.className) }, p.attrs), p.children);
+  };
+
+  /* <Switch checked onChange(bool) label="Notifications" disabled />: a real role=switch button, Space/Enter toggle, label is its name. */
+  kit.Switch = function (p) {
+    var id = kit.useId("sw");
+    return h("span", { className: cx("kit-switch-wrap", p.className) },
+      h("button", merge({ type: "button", id: id, role: "switch", "aria-checked": p.checked ? "true" : "false", disabled: p.disabled || undefined,
+        className: cx("kit-switch", p.checked && "kit-switch-on"), onClick: function () { if (p.onChange) p.onChange(!p.checked); } }, p.attrs),
+        h("span", { className: "kit-switch-knob", "aria-hidden": "true" })),
+      p.label ? h("label", { htmlFor: id, className: "kit-switch-label" }, p.label) : null);
+  };
+
+  /* ---- SearchInput --------------------------------------------------------------------------------------------- */
+  /* <SearchInput label="Search files" onSearch={q => ...} delay={300} placeholder />. Calls onSearch once typing pauses (and
+     immediately on Enter or Clear); never on first render. The label is visually hidden but always present for screen readers. */
+  kit.SearchInput = function (p) {
+    var s = useState(p.defaultValue || ""), text = s[0], setText = s[1];
+    var debounced = kit.useDebounce(text, p.delay);
+    var first = useRef(true), cb = useRef(p.onSearch); cb.current = p.onSearch;
+    var id = kit.useId("search");
+    useEffect(function () { if (first.current) { first.current = false; return; } if (cb.current) cb.current(debounced); }, [debounced]);
+    function now(v) { setText(v); if (cb.current) cb.current(v); }
+    return h("div", { className: cx("kit-search", p.className), role: "search" },
+      h("label", { htmlFor: id, className: "kit-sr" }, p.label || "Search"),
+      h("input", { id: id, type: "search", className: "kit-input", value: text, placeholder: p.placeholder || "Search…", autoComplete: "off",
+        onChange: function (e) { setText(e.target.value); }, onKeyDown: function (e) { if (e.key === "Enter") { e.preventDefault(); now(text); } } }),
+      text ? h("button", { type: "button", className: "kit-alert-x kit-search-x", "aria-label": "Clear search", onClick: function () { now(""); } }, "×") : null);
+  };
+
+  /* ---- ConfirmDialog ------------------------------------------------------------------------------------------- */
+  /* <ConfirmDialog open title="Delete 3 files?" confirmLabel="Delete" danger onConfirm={() => promise} onClose>This cannot be undone.</ConfirmDialog>
+     An alertdialog. Focus starts on Cancel (the safe choice). While onConfirm runs the buttons are busy; a rejection shows its
+     message inside the dialog and keeps it open so nothing is lost. It closes itself when onConfirm resolves. */
+  kit.ConfirmDialog = function (p) {
+    var b = useState(false), busy = b[0], setBusy = b[1];
+    var e = useState(""), err = e[0], setErr = e[1];
+    useEffect(function () { if (p.open) { setBusy(false); setErr(""); } }, [p.open]);
+    function go() {
+      setBusy(true); setErr("");
+      Promise.resolve().then(p.onConfirm).then(function () { setBusy(false); if (p.onClose) p.onClose(); },
+        function (x) { setBusy(false); setErr(x && x.message ? x.message : String(x || "Something went wrong")); });
+    }
+    return h(kit.Dialog, { open: !!p.open, onClose: busy ? function () {} : p.onClose, title: p.title, alert: true, className: p.className,
+      footer: [h(kit.Button, { key: "c", disabled: busy, onClick: p.onClose, attrs: { "data-autofocus": "true" } }, p.cancelLabel || "Cancel"),
+        h(kit.Button, { key: "ok", variant: p.danger ? "danger" : "primary", loading: busy, onClick: go }, p.confirmLabel || "Confirm")] },
+      err ? h(kit.Alert, { tone: "danger", className: "kit-gap" }, err) : null, p.children);
+  };
+
+  /* ---- Toasts -------------------------------------------------------------------------------------------------- */
+  /* Wrap the page once: <ToastProvider>...</ToastProvider>. Anywhere inside: const toast = useToast(); toast.push("Saved", { tone: "success" }).
+     Messages sit in a polite live region (errors are assertive), auto-dismiss after `duration` ms (0 = stay until dismissed; errors
+     default to staying), pause while hovered or focused, and each has a Dismiss button. Outside a provider, push is a safe no-op. */
+  var ToastCtx = React.createContext({ push: function () { return 0; }, dismiss: function () {} });
+  kit.useToast = function () { return React.useContext(ToastCtx); };
+  kit.ToastProvider = function (p) {
+    var s = useState([]), items = s[0], setItems = s[1];
+    var timers = useRef({}), seq = useRef(0);
+    var dismiss = useCallback(function (id) { clearTimeout(timers.current[id]); delete timers.current[id]; setItems(function (l) { return l.filter(function (t) { return t.id !== id; }); }); }, []);
+    var arm = useCallback(function (id, ms) { clearTimeout(timers.current[id]); if (ms > 0) timers.current[id] = setTimeout(function () { dismiss(id); }, ms); }, [dismiss]);
+    var push = useCallback(function (message, o) {
+      o = o || {}; var id = ++seq.current, tone = o.tone || "info";
+      var ms = o.duration != null ? o.duration : (tone === "danger" ? 0 : 5000);
+      setItems(function (l) { return l.concat([{ id: id, message: message, tone: tone, ms: ms }]).slice(-5); });
+      arm(id, ms); return id;
+    }, [arm]);
+    useEffect(function () { return function () { var t = timers.current; for (var k in t) clearTimeout(t[k]); }; }, []);
+    var api = React.useMemo(function () { return { push: push, dismiss: dismiss }; }, [push, dismiss]);
+    return h(ToastCtx.Provider, { value: api }, p.children,
+      h("div", { className: "kit-toasts", "aria-live": "polite", "aria-label": "Notifications", role: "region" },
+        items.map(function (t) {
+          return h("div", { key: t.id, className: cx("kit-toast", "kit-alert", "kit-alert-" + t.tone), role: t.tone === "danger" ? "alert" : "status",
+            onMouseEnter: function () { clearTimeout(timers.current[t.id]); }, onMouseLeave: function () { arm(t.id, t.ms); },
+            onFocus: function () { clearTimeout(timers.current[t.id]); }, onBlur: function () { arm(t.id, t.ms); } },
+            h("div", { className: "kit-alert-body" }, t.message),
+            h("button", { type: "button", className: "kit-alert-x", "aria-label": "Dismiss notification", onClick: function () { dismiss(t.id); } }, "×"));
+        })));
+  };
+
+  /* ---- DataTable ----------------------------------------------------------------------------------------------- */
+  /* <DataTable caption="Files" columns={[{key,label,render?(row),sortable?,align?}]} rows rowKey="id" sort={{key,dir:"asc"|"desc"}} onSort(key,dir)
+        loading error onRetry empty={<EmptyState/>} skeletonRows={5} onRowClick(row) />
+     A real <table> (caption, scoped headers, aria-sort on the sorted column). Sorting is the caller's (server or client): the table
+     only reports intent, so it scales to paged data. Loading with rows already shown keeps them on screen (aria-busy); with none it
+     shows skeleton rows. Wide tables scroll inside their own region (keyboard focusable) instead of breaking the page. */
+  kit.DataTable = function (p) {
+    var cols = p.columns || [], rows = p.rows || [];
+    var rk = p.rowKey || "id";
+    function keyOf(r, i) { return typeof rk === "function" ? rk(r) : (r[rk] != null ? r[rk] : i); }
+    function clickSort(c) {
+      if (!p.onSort) return;
+      var dir = p.sort && p.sort.key === c.key && p.sort.dir === "asc" ? "desc" : "asc";
+      p.onSort(c.key, dir);
+    }
+    var body;
+    if (p.error) {
+      return h(kit.Alert, { tone: "danger", title: p.errorTitle || "Could not load this", action: p.onRetry ? h(kit.Button, { size: "sm", onClick: p.onRetry }, "Try again") : null }, p.error);
+    }
+    if (p.loading && !rows.length) {
+      var sk = [];
+      for (var i = 0; i < (p.skeletonRows || 5); i++) {
+        sk.push(h("tr", { key: i, "aria-hidden": "true" }, cols.map(function (c) { return h("td", { key: c.key }, h(kit.Skeleton, null)); })));
+      }
+      body = sk;
+    } else if (!rows.length) {
+      return p.empty || h(kit.EmptyState, { title: "Nothing here yet" });
+    } else {
+      body = rows.map(function (r, i) {
+        var click = p.onRowClick;
+        return h("tr", { key: keyOf(r, i), className: click ? "kit-row-click" : undefined, onClick: click ? function () { click(r); } : undefined },
+          cols.map(function (c, ci) {
+            var head = ci === 0 && p.rowHeader !== false;
+            return h(head ? "th" : "td", { key: c.key, scope: head ? "row" : undefined, style: c.align ? { textAlign: c.align } : undefined }, c.render ? c.render(r) : r[c.key]);
+          }));
+      });
+    }
+    return h("div", { className: cx("kit-table-wrap", p.className), role: "region", "aria-label": p.caption, tabIndex: 0, "aria-busy": p.loading ? "true" : "false" },
+      h("table", { className: "kit-table" },
+        p.caption ? h("caption", { className: "kit-sr" }, p.caption) : null,
+        h("thead", null, h("tr", null, cols.map(function (c) {
+          var sorted = p.sort && p.sort.key === c.key ? p.sort.dir : null;
+          return h("th", { key: c.key, scope: "col", style: c.align ? { textAlign: c.align } : undefined,
+            "aria-sort": c.sortable ? (sorted === "asc" ? "ascending" : sorted === "desc" ? "descending" : "none") : undefined },
+            c.sortable ? h("button", { type: "button", className: "kit-th-btn", onClick: function () { clickSort(c); } }, c.label,
+              h("span", { "aria-hidden": "true" }, sorted === "asc" ? " ▲" : sorted === "desc" ? " ▼" : " ↕")) : c.label);
+        }))),
+        h("tbody", null, body)));
+  };
+
+  /* ---- Pagination ---------------------------------------------------------------------------------------------- */
+  /* <Pagination page={1} pageCount={12} onChange(page) label="Files pages" />. Previous/Next plus a window of numbers with
+     ellipses; the current page has aria-current="page". Renders nothing for a single page. */
+  kit.Pagination = function (p) {
+    var n = p.pageCount || 1, cur = Math.min(Math.max(p.page || 1, 1), n);
+    if (n <= 1) return null;
+    var nums = [], last = 0;
+    for (var i = 1; i <= n; i++) {
+      if (i === 1 || i === n || Math.abs(i - cur) <= 1) { if (last && i - last > 1) nums.push("gap" + i); nums.push(i); last = i; }
+    }
+    function go(i) { if (i >= 1 && i <= n && i !== cur && p.onChange) p.onChange(i); }
+    return h("nav", { className: cx("kit-pager", p.className), "aria-label": p.label || "Pagination" },
+      h(kit.Button, { size: "sm", variant: "ghost", disabled: cur === 1, onClick: function () { go(cur - 1); }, attrs: { "aria-label": "Previous page" } }, "‹"),
+      nums.map(function (x) {
+        return typeof x === "string" ? h("span", { key: x, className: "kit-pager-gap", "aria-hidden": "true" }, "…")
+          : h(kit.Button, { key: x, size: "sm", variant: x === cur ? "primary" : "ghost", onClick: function () { go(x); }, attrs: { "aria-current": x === cur ? "page" : undefined, "aria-label": "Page " + x } }, String(x));
+      }),
+      h(kit.Button, { size: "sm", variant: "ghost", disabled: cur === n, onClick: function () { go(cur + 1); }, attrs: { "aria-label": "Next page" } }, "›"));
   };
 
   UI.kit = kit;
