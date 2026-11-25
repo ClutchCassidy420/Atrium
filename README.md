@@ -1,6 +1,6 @@
 # Atrium: a front end for Hermes Agent
 
-[![tests](https://github.com/ClutchCassidy420/Atrium-Front-End-for-Hermes-Agent/actions/workflows/tests.yml/badge.svg)](https://github.com/ClutchCassidy420/Atrium-Front-End-for-Hermes-Agent/actions/workflows/tests.yml) [![license: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
+[![tests](https://github.com/ClutchCassidy420/Atrium/actions/workflows/tests.yml/badge.svg)](https://github.com/ClutchCassidy420/Atrium/actions/workflows/tests.yml) [![license: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 
 **A private, installable web app for your AI agent.** Chat, a mission-control home screen, scheduled jobs, a notes graph, a
 kanban board, approvals, phone notifications, a coding workspace, email, files, calendar and media, in one place, with real sign-in
