@@ -16,6 +16,12 @@ You will get an answer as soon as I can manage; this is a small project run by o
 - Give the app its own network to Hermes (see `deploy/compose.example.yaml`) and run it as a non-root user, as the example does.
 - Only owners can approve the agent's proposed actions; keep the owner role for people you trust fully.
 
+## Known limits
+
+- The page policy still allows inline styles (`style-src 'unsafe-inline'`) because the bundled terminal library writes its own style rules. Scripts are never inline. Removing the allowance needs a nonce-based change to that library and is not done yet.
+- Sign-in lockouts and rate limits are kept in memory, so they reset when the app restarts and are per process. Run one worker.
+- The image includes a health check that calls `/healthz`; a reverse proxy or orchestrator can use the same address.
+
 ## Supported versions
 
 Only the latest release gets fixes.

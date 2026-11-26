@@ -21,8 +21,8 @@ ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"        # no 0/O or 1/I to mix up w
 
 
 def new_code() -> str:
-    raw = "".join(secrets.choice(ALPHABET) for _ in range(8))
-    return raw[:4] + "-" + raw[4:]
+    raw = "".join(secrets.choice(ALPHABET) for _ in range(12))        # 60 bits: too many to guess even from many addresses
+    return raw[:4] + "-" + raw[4:8] + "-" + raw[8:]
 
 
 def _norm(text: str) -> str:
@@ -99,7 +99,7 @@ def mount(app, cfg, users, throttle, page_doc, same_origin, client_address) -> F
             '<main class="card"><h1>%s</h1><p class="sub">Welcome. Make the owner account to get started.</p>%s'
             '<form method="post" action="/setup">'
             '<label for="sc">Setup code</label>'
-            '<input id="sc" name="code" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="XXXX-XXXX" required autofocus>'
+            '<input id="sc" name="code" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="XXXX-XXXX-XXXX" required autofocus>'
             '<p class="sub">Shown in the app\'s log when it started: <code>docker compose logs</code></p>'
             '<label for="un">Your username</label>'
             '<input id="un" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" value="%s" required>'
@@ -125,7 +125,7 @@ def mount(app, cfg, users, throttle, page_doc, same_origin, client_address) -> F
         if not first.open():
             return RedirectResponse("/login", status_code=303)
         key = "setup:" + client_address(request)
-        left = throttle.locked(key)
+        left = max(throttle.locked(key), throttle.locked("setup:all"))        # one address, and all addresses together
         if left:
             return form("Too many wrong codes. Try again in %d minutes." % ((left + 59) // 60), 429)
         body = (await request.body())[:4096].decode("utf-8", "replace")
@@ -136,6 +136,7 @@ def mount(app, cfg, users, throttle, page_doc, same_origin, client_address) -> F
             first.create_owner(pick("code"), username, pick("password"), pick("again"))
         except PermissionError as exc:
             throttle.failed(key)
+            throttle.failed("setup:all", max_fails=50)
             return form(str(exc), 403, username)
         except UserError as exc:
             return form(str(exc), 400, username)
